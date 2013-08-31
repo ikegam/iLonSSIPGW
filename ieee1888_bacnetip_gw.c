@@ -1,0 +1,1670 @@
+/*
+ * IEEE1888 - BACnet/IP GW
+ *
+ * author: Hideya Ochiai
+ * create: 2012-10-03
+ * update: 2012-12-06  from Dallas to Tokyo
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+
+#include "bacnetip.h"
+#include "ieee1888.h"
+#include "ieee1888_datapool.h"
+
+#define IEEE1888_BACNETIP_POINTID_LEN     256
+#define IEEE1888_BACNETIP_VALUE_LEN        20
+#define IEEE1888_BACNETIP_TIME_LEN         32
+#define IEEE1888_BACNETIP_POINT_COUNT    1024
+#define IEEE1888_BACNETIP_HOSTNAME_LEN     64
+
+#define IEEE1888_BACNETIP_BULK_SESSION_TIMEOUT 15
+
+// access methods and access permission
+#define IEEE1888_BACNETIP_ACCESS_NONE      0
+#define IEEE1888_BACNETIP_ACCESS_READ      1
+#define IEEE1888_BACNETIP_ACCESS_WRITE     2
+#define IEEE1888_BACNETIP_ACCESS_READWRITE 3
+
+#define IEEE1888_BACNETIP_OK    0
+#define IEEE1888_BACNETIP_ERROR 1
+
+// log level
+#define IEEE1888_BACNETIP_LOGLEVEL_DEBUG  1
+#define IEEE1888_BACNETIP_LOGLEVEL_INFO   2
+#define IEEE1888_BACNETIP_LOGLEVEL_WARN   3
+#define IEEE1888_BACNETIP_LOGLEVEL_ERROR  4
+
+struct bacnetipGW_baseConfig {
+  char point_id[IEEE1888_BACNETIP_POINTID_LEN];
+  char host[IEEE1888_BACNETIP_HOSTNAME_LEN];
+  unsigned short port;
+  unsigned long object_id;
+  unsigned char property_id;
+  uint8_t data_type;
+  uint8_t permission;
+  int8_t exp;
+  time_t status_time;
+  char status_value[IEEE1888_BACNETIP_VALUE_LEN];
+};
+
+struct bacnetipGW_baseConfig m_config[IEEE1888_BACNETIP_POINT_COUNT];
+int n_m_config=0;
+
+pthread_t __bacnetipGW_writeClient_thread;
+void* bacnetipGW_writeClient_thread(void* args);
+
+pthread_t __bacnetipGW_fetchClient_thread;
+void* bacnetipGW_fetchClient_thread(void* args);
+
+char m_writeServer_ids[IEEE1888_BACNETIP_POINT_COUNT][IEEE1888_BACNETIP_POINTID_LEN];
+char m_fetchServer_ids[IEEE1888_BACNETIP_POINT_COUNT][IEEE1888_BACNETIP_POINTID_LEN];
+char m_writeClient_ids[IEEE1888_BACNETIP_POINT_COUNT][IEEE1888_BACNETIP_POINTID_LEN];
+char m_fetchClient_ids[IEEE1888_BACNETIP_POINT_COUNT][IEEE1888_BACNETIP_POINTID_LEN];
+
+int n_m_writeServer_ids=0;
+int n_m_fetchServer_ids=0;
+int n_m_writeClient_ids=0;
+int n_m_fetchClient_ids=0;
+
+#define IEEE1888_SERVER_URL_LEN 256
+
+char m_writeClient_ieee1888_server_url[IEEE1888_SERVER_URL_LEN];
+int m_writeClient_trigger_frequency;
+int m_writeClient_trigger_offset;
+
+char m_fetchClient_ieee1888_server_url[IEEE1888_SERVER_URL_LEN];
+int m_fetchClient_trigger_frequency;
+int m_fetchClient_trigger_offset;
+
+pthread_t __bacnetipGW_printStatus_thread;
+void* bacnetipGW_printStatus_thread(void* args);
+char m_printStatus_filepath[256];
+
+int m_datapool_timespan;
+
+void bacnetipGW_log(const char* logMessage, int logLevel);
+
+
+ieee1888_error* bacnetipGW_pointsTest(char ids[][IEEE1888_BACNETIP_POINTID_LEN], uint8_t access[], int n_point){
+
+  int i,j;
+  for(i=0;i<n_point;i++){
+    for(j=0;j<n_m_config;j++){
+      if(strcmp(ids[i],m_config[j].point_id)==0){
+	if((access[i]&m_config[j].permission)!=access[i]){
+	  char buf[1024];
+	  if(access[i]==IEEE1888_BACNETIP_ACCESS_READ){
+            sprintf(buf,"Read access to %s is prohibitted.",ids[i]);
+	  }else if(access[i]==IEEE1888_BACNETIP_ACCESS_WRITE){
+            sprintf(buf,"Write access to %s is prohibitted.",ids[i]);
+	  }else{
+            sprintf(buf,"Unknown access to %s is prohibitted.",ids[i]);
+	  }
+	  return ieee1888_mk_error_forbidden(buf);
+	}
+        break;
+      }
+    }
+    if(j==n_m_config){
+      char buf[1024];
+      sprintf(buf,"%s",ids[i]);
+      return ieee1888_mk_error_point_not_found(buf);
+    }
+  }
+  return NULL;
+}
+
+int bacnetipGW_findConfig(char id[], struct bacnetipGW_baseConfig** pconfig){
+  
+  int j;
+  for(j=0;j<n_m_config;j++){
+    if(strcmp(id,m_config[j].point_id)==0){
+      *pconfig=&m_config[j];
+      return IEEE1888_BACNETIP_OK;
+    }
+  }
+  return IEEE1888_BACNETIP_ERROR;
+}
+
+int bacnetipGW_bacnetRead(char ids[][IEEE1888_BACNETIP_POINTID_LEN], time_t times[], char values[][IEEE1888_BACNETIP_VALUE_LEN], int n_point){
+
+  int i;
+  struct bacnetipGW_baseConfig* config;
+  time_t start=time(NULL);
+
+  char black_host[8][IEEE1888_BACNETIP_HOSTNAME_LEN];
+  int n_black_host=0;
+
+  for(i=0;i<n_point;i++){
+    if(bacnetipGW_findConfig(ids[i],&config)==IEEE1888_BACNETIP_OK){
+
+      time_t now=time(NULL);
+      if(now<start || now>start+IEEE1888_BACNETIP_BULK_SESSION_TIMEOUT){
+        bacnetipGW_log("BACnet bulk session(read) timedout\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        return IEEE1888_BACNETIP_ERROR;
+      }
+
+      int k=-1;
+      for(k=0;k<n_black_host;k++){
+        if(strcmp(black_host[k],config->host)==0){
+          break;
+        }
+      }
+      if(k<n_black_host){
+        continue;
+      }
+
+      // raw read: invoke readProperty
+      struct bacnet_data bdata;
+      bdata.type=BACNET_DATATYPE_NULL;
+      if(BACNET_OK == readProperty(config->host,config->port,
+               		   config->object_id,config->property_id,
+                           &bdata) ){
+
+	char value[IEEE1888_BACNETIP_VALUE_LEN];
+	memset(value,0,sizeof(value));
+
+        // Translation into string
+	switch(bdata.type){
+        case BACNET_DATATYPE_NULL:
+          value[0]=0;
+          break;
+
+        case BACNET_DATATYPE_BOOLEAN:
+          if(bdata.value_boolean){
+            sprintf(value,"1");
+          }else{
+            sprintf(value,"0");
+          }
+          break;
+
+	case BACNET_DATATYPE_UNSIGNED_INT: 
+	  sprintf(value,"%u",bdata.value_unsigned);
+	  break;
+
+	case BACNET_DATATYPE_SIGNED_INT:
+	  sprintf(value,"%d",bdata.value_signed);
+	  break;
+
+	case BACNET_DATATYPE_REAL:
+          {
+            int e;
+            float value_real=bdata.value_real;
+            for(e=0;e<config->exp;e++){ value_real*=10.0; }
+            for(e=0;e<-config->exp;e++){ value_real/=10.0; }
+	    sprintf(value,"%f",value_real);
+          }
+	  break;
+
+	case BACNET_DATATYPE_CHARACTER_STRING:
+	  sprintf(value,"%s",bdata.value_str);
+	  break;
+
+	case BACNET_DATATYPE_ENUMERATED:
+	  sprintf(value,"%d",bdata.value_enum);
+	  break;
+
+	default:
+	  sprintf(value,"err (unsupported:%d)",bdata.type);
+          {
+            char logbuf[1000];
+            sprintf(logbuf,"Unsupported datatype=%d\n",bdata.type);
+            bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
+          }
+	}
+
+        // debug code
+	//printf("raw=%s\n",value); fflush(stdout);
+
+
+        if( bdata.type==BACNET_DATATYPE_UNSIGNED_INT
+         || bdata.type==BACNET_DATATYPE_SIGNED_INT){
+          // multiply (10^exp)
+	  if(config->exp<0){ // insert "." at the end (-exp) of value (add 0 in front of value in some cases)
+
+            if(value[0]!='-'){
+	      // if the value is non negative
+	      int len=strlen(value);
+              int dot_index=len+config->exp;
+	      if(dot_index>0){
+	        if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
+	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+	        }
+	        int k;
+                for(k=len;k>dot_index;k--){
+                  value[k]=value[k-1];
+	        }
+	        value[dot_index]='.';
+	      }else{
+	        int k;
+	        int shift=1-dot_index;
+	        if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
+	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+	        }
+	        for(k=len-1;k>=0;k--){
+	          value[k+shift]=value[k];
+	        }
+	        for(k=0;k<shift;k++){
+	          value[k]='0';
+	        }
+	        for(k=len+shift;k>1;k--){
+                  value[k]=value[k-1];
+	        }
+	        value[1]='.';
+	      }
+	    }else{
+	      // if the value is negative
+	      int len=strlen(value);
+	      int dot_index=len+config->exp;
+	      if(dot_index>1){
+	        if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
+	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+	        }
+	        int k;
+                for(k=len;k>dot_index;k--){
+                  value[k]=value[k-1];
+	        }
+	        value[dot_index]='.';
+	      }else{
+	        int k;
+	        int shift=2-dot_index;
+	        if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
+	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+	        }
+	        for(k=len-1;k>=1;k--){
+	          value[k+shift]=value[k];
+	        }
+	        for(k=1;k<shift+1;k++){
+	          value[k]='0';
+	        }
+	        for(k=len+shift+1;k>2;k--){
+                  value[k]=value[k-1];
+	        }
+	        value[2]='.';
+	      }
+	    }
+          
+	  }else if(config->exp>0){  // add "0" exp times in the end of value
+	    int len=strlen(value);
+	    if(len==1 && value[0]=='0'){
+              // DO NOTHING: because 0 multiply 10^config.exp == 0 
+	    }else{
+	      if(len+config->exp<=IEEE1888_BACNETIP_VALUE_LEN){
+	        int k;
+	        for(k=0;k<config->exp;k++){
+	          value[len+k]='0';
+	        }
+	      }else{
+                return IEEE1888_BACNETIP_ERROR; // exceeds the maximum length of the value
+	      }
+	    }
+	  }else{
+            // DO NOTHING (nothing to do)
+	  }
+        }
+	//printf("multiplied=%s\n",value); fflush(stdout);
+
+        time_t record_time=time(NULL);
+        // copy value to the area of caller
+	strncpy(values[i],value,IEEE1888_BACNETIP_VALUE_LEN);
+        times[i]=record_time;
+
+        // load into the status buffer
+        config->status_time=record_time;
+        strncpy(config->status_value,value,IEEE1888_BACNETIP_VALUE_LEN);
+
+      }else{
+        char logbuf[1000];
+        sprintf(logbuf,"Failed to get data of %s from BACnet\n",config->point_id);
+        bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        
+	values[i][0]='\0';
+        times[i]=0;
+        
+        config->status_time=0;
+        config->status_value[0]='\0';
+
+        if(n_black_host<8){
+          strcpy(black_host[n_black_host],config->host);
+          n_black_host++;
+        }
+        // return IEEE1888_BACNETIP_ERROR; // error occured during bacnet.readProperty 
+      }
+    }
+  }
+  return IEEE1888_BACNETIP_OK;
+}
+
+int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char values[][IEEE1888_BACNETIP_VALUE_LEN], int n_point){
+
+  int i;
+  struct bacnetipGW_baseConfig *config;
+  
+  // pre-processing -- prepare binary objects to write (if error found, abort the mission.)
+  struct bacnet_data bdata[n_point]; 
+ 
+  for(i=0;i<n_point;i++){
+    if(bacnetipGW_findConfig(ids[i],&config)==IEEE1888_BACNETIP_OK){
+      
+      // parse the value and generate binary format according to the config.type and config.exp
+      uint8_t data[4];
+      int64_t value_64=0;
+      struct bacnet_data* pdata;
+      char value_str[IEEE1888_BACNETIP_VALUE_LEN];
+      memset(value_str,0,sizeof(value_str));
+      strcpy(value_str,values[i]);
+
+      pdata=&bdata[i];
+
+      // load into the status buffer
+      config->status_time=time(NULL);
+      strncpy(config->status_value,value_str,IEEE1888_BACNETIP_VALUE_LEN);
+
+      if(config->exp<0){
+        int len=strlen(value_str);
+	char* pdot=strstr(value_str,".");
+	if(pdot==NULL){
+	  // if no dot(.)
+	  int k;
+	  for(k=0;k<-config->exp;k++){
+	    value_str[len+k]='0';
+	  }
+	}else{
+	  // if dot(.) found
+          int k;
+	  char* pend=pdot-config->exp;
+	  int end_len=pend-value_str+1;
+	  for(k=len;k<end_len;k++){  // fill by '0' if not presented
+	    value_str[k]='0';
+	  }
+	  for(k=0;k<-config->exp;k++){  // shift (for removing dot(.))
+            *(pdot+k)=*(pdot+k+1);
+	  }
+	  *pend='\0';                  // finish (by pending null character)
+	}
+	value_64=atoll(value_str);
+
+      }else if(config->exp>0){
+        int len=strlen(value_str);
+        char* pdot=strstr(value_str,".");
+	if(pdot!=NULL){
+	  len=pdot-value_str;
+	}
+
+	if(value_str[0]!='-'){ // if non-negative
+	  if(config->exp>=len){
+	    value_str[0]='0';
+	    value_str[1]='\0';
+	  }else{
+            value_str[len-config->exp]='\0';
+	  }
+	}else{ // if negative
+	  if(config->exp+1>=len){
+	    value_str[0]='0';
+	    value_str[1]='\0';
+	  }else{
+            value_str[len-config->exp]='\0';
+	  }
+	}
+	value_64=atoll(value_str);
+	
+      }else{
+        value_64=atoll(value_str);
+      }
+
+      // encode into the data
+      switch(config->data_type){
+      case BACNET_DATATYPE_BOOLEAN:
+        if(strcmp(value_str,"1")==0){
+          pdata->type=BACNET_DATATYPE_BOOLEAN;
+          pdata->value_boolean=1;
+        }else if(strcmp(value_str,"0")==0){
+          pdata->type=BACNET_DATATYPE_BOOLEAN;
+          pdata->value_boolean=0;
+        }else{
+          char logbuf[1000];
+          sprintf(logbuf,"boolean type schema error boolean=%s \n",value_str);
+          bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        }
+        break;
+   
+      case BACNET_DATATYPE_UNSIGNED_INT:
+        pdata->type=BACNET_DATATYPE_UNSIGNED_INT;
+	pdata->value_unsigned=(unsigned int)value_64;
+        break;
+      case BACNET_DATATYPE_SIGNED_INT:
+        pdata->type=BACNET_DATATYPE_SIGNED_INT;
+	pdata->value_signed=(int)value_64;
+        break;
+      case BACNET_DATATYPE_REAL:
+        pdata->type=BACNET_DATATYPE_REAL;
+        {
+          int e;
+          float value_real=atof(value_str);
+          for(e=0;e<config->exp;e++){ value_real/=10.0; }
+          for(e=0;e<-config->exp;e++){ value_real*=10.0; }
+	  pdata->value_real=value_real;
+        }
+        break;
+      case BACNET_DATATYPE_CHARACTER_STRING:
+        pdata->type=BACNET_DATATYPE_CHARACTER_STRING;
+	strcpy(pdata->value_str,value_str);
+        break;
+      case BACNET_DATATYPE_ENUMERATED:
+        pdata->type=BACNET_DATATYPE_ENUMERATED;
+	pdata->value_enum=(int)value_64;
+        break;
+      default:
+        return IEEE1888_BACNETIP_ERROR; // unsupported data type is configured.
+      }
+    }
+  }
+  
+  time_t start=time(NULL);
+  
+  char black_host[8][IEEE1888_BACNETIP_HOSTNAME_LEN];
+  int n_black_host=0;
+  
+  // write processing
+  for(i=0;i<n_point;i++){
+    if(bacnetipGW_findConfig(ids[i],&config)==IEEE1888_BACNETIP_OK){
+      
+      time_t now=time(NULL);
+      if(now<start || now>start+IEEE1888_BACNETIP_BULK_SESSION_TIMEOUT){
+        bacnetipGW_log("BACnet bulk session(write) timedout\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        return IEEE1888_BACNETIP_ERROR;
+      }
+      
+      int k=-1;
+      for(k=0;k<n_black_host;k++){
+        if(strcmp(black_host[k],config->host)==0){
+          break;
+        }
+      }
+      if(k<n_black_host){
+        continue;
+      }
+
+      if(BACNET_OK == writeProperty(config->host,config->port,
+                  	   config->object_id,config->property_id,
+                           &bdata[i]) ){
+        // SUCCESS
+      }else{
+        char logbuf[1000];
+        sprintf(logbuf,"Failed to set the data of %s into BACnet\n",config->point_id);
+        bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        
+        if(n_black_host<8){
+          strcpy(black_host[n_black_host],config->host);
+          n_black_host++;
+        }
+        // return IEEE1888_BACNETIP_ERROR;
+      }
+    }else{
+      return IEEE1888_BACNETIP_ERROR;
+    }
+  }
+  if(n_black_host>0){
+    return IEEE1888_BACNETIP_ERROR;
+  }
+
+  return IEEE1888_BACNETIP_OK;
+}
+
+
+ieee1888_error* bacnetipGW_ieee1888read(ieee1888_point point[], int n_point, time_t timeAs){
+
+
+  bacnetipGW_log("bacnetipGW_ieee1888read(begin)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+  uint8_t access[n_point];
+  memset(access,IEEE1888_BACNETIP_ACCESS_READ,sizeof(access));
+  
+  int i;
+  char ids[n_point][IEEE1888_BACNETIP_POINTID_LEN];
+  for(i=0;i<n_point;i++){
+    if(strlen(point[i].id)>=IEEE1888_BACNETIP_POINTID_LEN){
+      bacnetipGW_log("TOO LONG POINT ID\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+      bacnetipGW_log("bacnetipGW_ieee1888read(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+      return ieee1888_mk_error_server_error("TOO LONG POINT ID");
+    }
+    strncpy(ids[i],point[i].id,IEEE1888_BACNETIP_POINTID_LEN);
+  }
+  
+  ieee1888_error* myerr=bacnetipGW_pointsTest(ids,access,n_point);
+  if(myerr!=NULL){
+    return myerr;
+  }
+  
+  char values[n_point][IEEE1888_BACNETIP_VALUE_LEN];
+  time_t times[n_point];
+  if(bacnetipGW_bacnetRead(ids,times,values,n_point)==IEEE1888_BACNETIP_OK){
+    for(i=0;i<n_point;i++){
+      if(times[i]!=0){
+        ieee1888_value* v=ieee1888_mk_value();
+        v->time=ieee1888_mk_time(timeAs);
+        v->content=ieee1888_mk_string(values[i]);
+        point[i].value=v;
+        point[i].n_value=1;
+      }
+    }
+    bacnetipGW_log("bacnetipGW_ieee1888read(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return NULL;
+  }else{
+    bacnetipGW_log("bacnetipGW bacnetRead failed\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    bacnetipGW_log("bacnetipGW_ieee1888read(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return ieee1888_mk_error_server_error("bacnetipGW bacnetRead failed");
+  }
+}
+
+ieee1888_error* bacnetipGW_ieee1888write(ieee1888_point point[], int n_point){
+
+  bacnetipGW_log("bacnetipGW_ieee1888write(begin)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+  uint8_t access[n_point];
+  memset(access,IEEE1888_BACNETIP_ACCESS_WRITE,sizeof(access));
+
+  int i;
+  char ids[n_point][IEEE1888_BACNETIP_POINTID_LEN];
+  char values[n_point][IEEE1888_BACNETIP_VALUE_LEN];
+  for(i=0;i<n_point;i++){
+    if(strlen(point[i].id)>=IEEE1888_BACNETIP_POINTID_LEN){
+      bacnetipGW_log("TOO LONG POINT ID\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+      bacnetipGW_log("bacnetipGW_ieee1888write(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+      return ieee1888_mk_error_server_error("TOO LONG POINT ID");
+    }
+    strncpy(ids[i],point[i].id,IEEE1888_BACNETIP_POINTID_LEN);
+
+    if(point[i].n_value>0 && point[i].value!=NULL){
+      ieee1888_value* v=&(point[i].value[point[i].n_value-1]);
+      if(strlen(v->content)>=IEEE1888_BACNETIP_VALUE_LEN){
+        bacnetipGW_log("TOO LONG VALUE\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        bacnetipGW_log("bacnetipGW_ieee1888write(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+        return ieee1888_mk_error_server_error("TOO LONG VALUE");
+      }
+      strncpy(values[i],v->content,IEEE1888_BACNETIP_VALUE_LEN);
+    }else{
+      // nothing to do for index i
+      values[i][0]='\0';
+    }
+  }
+  
+  // point id schema test
+  ieee1888_error* myerr=bacnetipGW_pointsTest(ids,access,n_point);
+  if(myerr!=NULL){
+    return myerr;
+  }
+
+  // shrink the ids
+  int k_point=0;
+  for(i=0;i<n_point;i++){
+    if(values[i][0]=='\0'){
+      continue;
+    }
+    if(k_point<i){
+      strcpy(ids[k_point],ids[i]);
+      strcpy(values[k_point],values[i]);
+    }
+    k_point++;
+  }
+  
+  if(bacnetipGW_bacnetWrite(ids,values,k_point)==IEEE1888_BACNETIP_OK){
+    bacnetipGW_log("bacnetipGW_ieee1888write(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return NULL;
+  }else{
+    bacnetipGW_log("bacnetipGW bacnetWrite failed\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    bacnetipGW_log("bacnetipGW_ieee1888write(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return ieee1888_mk_error_server_error("bacnetipGW bacnetWrite failed");
+  }
+}
+
+
+
+/*
+ * IEEE1888 service handlers
+ *
+ *  -- bacnetipGW_ieee1888_server_query
+ *       returns the data by reading from bacnet (by calling bacnetipGW_ieee1888read method)
+ *
+ *  -- bacnetipGW_ieee1888_server_data
+ *       pushes data by writing to bacnet (by calling bacnetipGW_ieee1888write method)
+ *
+ *  -- bacnetipGW_ieee1888_server_data_parse_request
+ *       parses the data request (prepare for committment)
+ *
+ *  -- bacnetipGW_ieee1888_server_data_commit_request
+ *       executes the data request (prepared for committment)
+ *         by calling bacnetipGW_ieee1888write method
+ */
+ieee1888_transport* bacnetipGW_ieee1888_server_query(ieee1888_transport* request, char** args){
+
+  bacnetipGW_log("bacnetipGW_ieee1888_server_query(begin)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+  ieee1888_transport* response=(ieee1888_transport*)ieee1888_clone_objects((ieee1888_object*)request,1);
+  
+  if(response->body!=NULL){
+    ieee1888_destroy_objects((ieee1888_object*)response->body);
+    free(response->body);
+    response->body=NULL;
+  }
+
+  ieee1888_header* header=response->header;
+  if(header==NULL){
+    response->header=ieee1888_mk_header();
+    response->header->error=ieee1888_mk_error_invalid_request("No header in the request.");
+    bacnetipGW_log("INVALID_REQUEST (No header in the request)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    bacnetipGW_log("bacnetipGW_ieee1888_server_query(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return response;
+  }
+  if(header->OK!=NULL){
+    response->header->error=ieee1888_mk_error_invalid_request("Invalid OK in the header.");
+    bacnetipGW_log("INVALID_REQUEST (Invalid OK in the header)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    bacnetipGW_log("bacnetipGW_ieee1888_server_query(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return response;
+  }
+  if(header->error!=NULL){
+    response->header->error=ieee1888_mk_error_invalid_request("Invalid error in the header.");
+    bacnetipGW_log("INVALID_REQUEST (Invalid error in the header)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    bacnetipGW_log("bacnetipGW_ieee1888_server_query(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return response;
+  }
+
+  ieee1888_query* query=header->query;
+  if(header->query==NULL){
+    response->header->error=ieee1888_mk_error_invalid_request("No query in the header.");
+    bacnetipGW_log("INVALID_REQUEST (No query in the header)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    bacnetipGW_log("bacnetipGW_ieee1888_server_query(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return response;
+  }
+
+  ieee1888_error* error=NULL;
+  if(strcmp(query->type,"storage")==0){
+
+    if(query->callbackData!=NULL){
+      // Do nothing (just ignore it)
+    }
+    if(query->callbackControl!=NULL){
+      // Do nothing (just ignore it)
+    }
+
+    // Parse the keys in detail
+    ieee1888_key* keys=query->key;
+    int n_keys=query->n_key;
+
+    ieee1888_point* points=NULL;
+    int n_points=0;
+    if(n_keys>0){
+      points=ieee1888_mk_point_array(n_keys);
+      n_points=n_keys;
+    }
+
+    int i;
+    for(i=0;i<n_keys;i++){
+      ieee1888_key* key=&keys[i];
+      if(key->id==NULL){
+        // error -- invalid id
+	error=ieee1888_mk_error_invalid_request("ID is missing in the query key");
+        bacnetipGW_log("INVALID_REQUEST (ID is missing in the query key)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->attrName==NULL){
+        // error -- invalid attrName
+	error=ieee1888_mk_error_invalid_request("attrName is missing in the query key");
+        bacnetipGW_log("INVALID_REQUEST (attrName is missing in the query key)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(strcmp(key->attrName,"time")!=0){
+        // error -- unsupported attrName
+	error=ieee1888_mk_error_query_not_supported("attrName other than \"time\" are not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (attrName other than \"time\" are not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->eq!=NULL){
+        // error -- not supported 
+	error=ieee1888_mk_error_query_not_supported("eq in the query key is not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (eq in the query key is not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->neq!=NULL){
+        // error -- not supported 
+	error=ieee1888_mk_error_query_not_supported("neq in the query key is not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (neq in the query key is not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->lt!=NULL){
+        // error -- not supported 
+	error=ieee1888_mk_error_query_not_supported("lt in the query key is not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (lt in the query key is not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->gt!=NULL){
+        // error -- not supported 
+	error=ieee1888_mk_error_query_not_supported("gt in the query key is not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (gt in the query key is not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->lteq!=NULL){
+        // error -- not supported 
+	error=ieee1888_mk_error_query_not_supported("lteq in the query key is not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (lteq in the query key is not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->gteq!=NULL){
+        // error -- not supported 
+	error=ieee1888_mk_error_query_not_supported("gteq in the query key is not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (gteq in the query key is not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->trap!=NULL){
+        // error -- not supported 
+	error=ieee1888_mk_error_query_not_supported("trap in the query key is not supported.");
+        bacnetipGW_log("QUERY_NOT_SUPPORTED (trap in the query key is not supported.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else if(key->select!=NULL && strcmp(key->select,"minimum")!=0 && strcmp(key->select,"maximum")!=0){
+        // error -- invalid select
+	error=ieee1888_mk_error_invalid_request("Invalid select in the query key.");
+        bacnetipGW_log("INVALID_REQUEST (Invalid select in the query key.)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+        break;
+
+      }else{
+
+        // fetchServer ID validity check
+	int j;
+	for(j=0;j<n_m_fetchServer_ids;j++){
+	  if(strcmp(key->id,m_fetchServer_ids[j])==0){
+	    points[i].id=ieee1888_mk_uri(key->id);
+            break;
+	  }
+	}
+	if(j==n_m_fetchServer_ids){
+	  char sbuf[IEEE1888_BACNETIP_POINTID_LEN+25];
+	  sprintf(sbuf,"Not allowed for fetch %s",key->id);
+	  error=ieee1888_mk_error_forbidden(sbuf);
+	  break;
+	}
+      }
+    }
+
+    if(error==NULL && n_points>0){
+      error=bacnetipGW_ieee1888read(points,n_points,time(NULL));
+    }
+
+    if(error==NULL){
+      // if no error (return OK)
+      response->header->OK=ieee1888_mk_OK();
+      response->body=ieee1888_mk_body();
+      response->body->point=points;
+      response->body->n_point=n_points;
+    }else{
+      // if error exists (return the error without body)
+      response->header->error=error;
+      ieee1888_body* body=ieee1888_mk_body();
+      body->point=points;
+      body->n_point=n_points;
+      ieee1888_destroy_objects((ieee1888_object*)body);
+      free(body);
+    }
+
+  }else if(strcmp(query->type,"stream")==0){
+    // not supported
+    error=ieee1888_mk_error_query_not_supported("type=\"stream\" in the query is not supported.");
+    bacnetipGW_log("QUERY_NOT_SUPPORTED (type=\"stream\" in the query is not supported.\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    response->header->error=error;
+
+  }else{
+    // error (invalid request)
+    error=ieee1888_mk_error_invalid_request("Invalid query type.");
+    bacnetipGW_log("INVALID_REQUEST (Invalid query type.\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    response->header->error=error;
+  }
+  bacnetipGW_log("bacnetipGW_ieee1888_server_query(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+  return response;
+}
+
+
+ieee1888_error* bacnetipGW_ieee1888_server_data_parse_request(ieee1888_pointSet* pointSet, int n_pointSet, ieee1888_point* point, int n_point, ieee1888_point* w_points, int* n_w_points){
+  
+  // fprintf(stdout,"bacnetipGW_ieee1888_server_data_parse_request(begin)\n");
+
+  int i,j;
+  for(i=0;i<n_pointSet;i++){
+    ieee1888_error* error=bacnetipGW_ieee1888_server_data_parse_request(pointSet[i].pointSet, pointSet[i].n_pointSet, pointSet[i].point, pointSet[i].n_point, w_points, n_w_points);
+    if(error!=NULL){
+      return error;
+    }
+  }
+
+  for(i=0;i<n_point;i++){
+    for(j=0;j<n_m_writeServer_ids;j++){
+      if(strcmp(point[i].id,m_writeServer_ids[j])==0){
+        // clone the point and the values
+	int n=*n_w_points;
+	w_points[n].id=ieee1888_mk_uri(point[i].id);
+	w_points[n].value=(ieee1888_value*)ieee1888_clone_objects((ieee1888_object*)point[i].value,point[i].n_value);
+        w_points[n].n_value=point[i].n_value;
+	++*n_w_points;
+	break;
+      }
+    }
+    if(j==n_m_writeServer_ids){
+      // Error
+      char ssbuf[128];
+      char sbuf[200];
+      strncpy(ssbuf,point[i].id,127);
+      sprintf(sbuf,"No WRITE permission for the point(%s)",ssbuf);
+      //fprintf(stdout,"ERROR: FORBIDDEN (%s)\n",sbuf);
+      //fprintf(stdout,"bacnetipGW_ieee1888_server_data_parse_request(end)\n");
+      return ieee1888_mk_error_forbidden(sbuf);
+    }
+  }
+  // fprintf(stdout,"bacnetipGW_ieee1888_server_data_parse_request(end)\n");
+  return NULL;
+}
+
+ieee1888_transport* bacnetipGW_ieee1888_server_data(ieee1888_transport* request,char** args){
+  
+  bacnetipGW_log("bacnetipGW_ieee1888_server_data(begin)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+  ieee1888_transport* response=ieee1888_mk_transport();
+
+  // check the validity of body 
+  ieee1888_body* body=request->body;
+  if(body==NULL){
+    response->header=ieee1888_mk_header();
+    response->header->error=ieee1888_mk_error_invalid_request("No body in the request.");
+    bacnetipGW_log("INVALID_REQUEST (No body in the request)\n",IEEE1888_BACNETIP_LOGLEVEL_WARN);
+    bacnetipGW_log("bacnetipGW_ieee1888_server_data(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    return response;
+  }
+
+  // Data buffer between parsing and committing the request
+  ieee1888_point* w_points=ieee1888_mk_point_array(IEEE1888_BACNETIP_POINT_COUNT);
+  int n_w_points=0;
+
+  // parse the "data" request (with preparing committing them), and returns error (only if failed).
+  ieee1888_error* error=bacnetipGW_ieee1888_server_data_parse_request(body->pointSet,body->n_pointSet,body->point,body->n_point,w_points,&n_w_points);
+
+  if(error!=NULL){
+     response->header=ieee1888_mk_header();
+     response->header->error=error;
+
+     int d=0;
+     for(d=0;d<IEEE1888_BACNETIP_POINT_COUNT;d++){
+       ieee1888_destroy_objects((ieee1888_object*)(w_points+d));
+     }
+     free(w_points);
+     char logbuf[2000];
+     sprintf(logbuf,"error replied: type=%s message=%s \n",error->type,error->content);
+     bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
+
+     bacnetipGW_log("bacnetipGW_ieee1888_server_data(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+     return response;
+  }
+        
+  // writeServer ID validity check
+  int i,j;
+  for(i=0;i<n_w_points;i++){
+    for(j=0;j<n_m_writeServer_ids;j++){
+      if(strcmp(w_points[i].id,m_writeServer_ids[j])==0){
+        break;
+      }
+    }
+    if(j==n_m_writeServer_ids){
+      char sbuf[IEEE1888_BACNETIP_POINTID_LEN*2];
+      sprintf(sbuf,"Not allowed for WRITE %s",w_points[i].id);
+      error=ieee1888_mk_error_forbidden(sbuf);
+      break;
+    }
+    if(error!=NULL){
+     response->header=ieee1888_mk_header();
+     response->header->error=error;
+
+     int d=0;
+     for(d=0;d<IEEE1888_BACNETIP_POINT_COUNT;d++){
+       ieee1888_destroy_objects((ieee1888_object*)(w_points+d));
+     }
+     free(w_points);
+
+     char logbuf[2000];
+     sprintf(logbuf,"error replied: type=%s message=%s \n",error->type,error->content);
+     bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
+
+     bacnetipGW_log("bacnetipGW_ieee1888_server_data(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+     return response;
+    }
+  }
+
+  // commit the "data" request, and returns error (only if failed).
+  if(error==NULL){
+    error=bacnetipGW_ieee1888write(w_points,n_w_points);
+  }
+
+  if(error!=NULL){
+     response->header=ieee1888_mk_header();
+     response->header->error=error;
+
+     int d=0;
+     for(d=0;d<IEEE1888_BACNETIP_POINT_COUNT;d++){
+       ieee1888_destroy_objects((ieee1888_object*)(w_points+d));
+     }
+     free(w_points);
+     
+     char logbuf[2000];
+     sprintf(logbuf,"error replied: type=%s message=%s \n",error->type,error->content);
+     bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
+
+     bacnetipGW_log("bacnetipGW_ieee1888_server_data(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+     return response;
+  }
+
+  // return OK, because succeeded.
+  response->header=ieee1888_mk_header();
+  response->header->OK=ieee1888_mk_OK();
+     
+  int d=0;
+  for(d=0;d<IEEE1888_BACNETIP_POINT_COUNT;d++){
+    ieee1888_destroy_objects((ieee1888_object*)(w_points+d));
+  }
+  free(w_points);
+
+  bacnetipGW_log("bacnetipGW_ieee1888_server_data(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+  return response;
+}
+
+
+/*
+ *  Automatic Threads (for periodic execution of WRITE and FETCH)
+ *
+ *   -- bacnetipGW_writeClient_thread
+ *         periodically reads the bacnet, and WRITE into m_writeClient_ieee1888_server_url.
+ *         (*) works only for pre-configured addresses by bacnetipGW_writeClient_ids
+ *       
+ *   -- bacnetipGW_fetchClient_thread
+ *         periodically FETCH from m_fetchClient_ieee1888_server_url, and writes the bacnet.
+ *         (*) works only for pre-configured addresses by bacnetipGW_fetchClient_ids
+ *
+ */
+
+void* bacnetipGW_writeClient_thread(void* args){
+
+  // if no points to work on --> return
+  if(n_m_writeClient_ids==0){
+    return NULL;
+  }
+
+  int i;
+  sleep(10); // wait at the startup
+  time_t last_upload=0;
+
+  // for debug
+  // int counter=0;
+
+  while(1){
+
+    // time check interval: 1 seconds
+    sleep(1);
+
+    time_t now=time(NULL);
+    if((last_upload-m_writeClient_trigger_offset)/m_writeClient_trigger_frequency
+           ==(now-m_writeClient_trigger_offset)/m_writeClient_trigger_frequency ){
+      continue;
+    }
+    last_upload=now;
+
+    // for debug
+    // printf("count: %d\n",counter++);
+
+    ieee1888_point* point=ieee1888_mk_point_array(n_m_writeClient_ids);
+    int n_point=n_m_writeClient_ids;
+    for(i=0;i<n_point;i++){
+      point[i].id=ieee1888_mk_uri(m_writeClient_ids[i]);
+    }
+
+    // read from bacnetip
+    time_t time_to_present=(now/m_writeClient_trigger_frequency)*m_writeClient_trigger_frequency;
+    if(bacnetipGW_ieee1888read(point,n_point,time_to_present)==IEEE1888_BACNETIP_OK){
+        
+      // send the data
+      bacnetipGW_log("bacnetipGW_writeClient_thread_WRITE(begin)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+      ieee1888_transport* rq_transport=ieee1888_mk_transport();
+      ieee1888_body* rq_body=ieee1888_mk_body();
+      rq_transport->body=rq_body;
+      rq_body->point=point;
+      rq_body->n_point=n_point;
+
+      ieee1888_transport* rs_transport=ieee1888_client_data(rq_transport,m_writeClient_ieee1888_server_url,NULL,NULL);
+      if(rs_transport!=NULL && rs_transport->header!=NULL && rs_transport->header->OK!=NULL){
+        bacnetipGW_log("writeClient success\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+      }else{
+        // Failed --> DUMP INTO DATAPOOL for retry
+        ieee1888_datapool_dump(rq_transport);
+
+        bacnetipGW_log("writeClient failure\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        // fprintf(stdout," this ==> server \n");
+        if(rq_transport!=NULL){
+          // ieee1888_dump_objects((ieee1888_object*)rq_transport);
+        }
+        // fprintf(stdout," this <== server \n");
+        if(rs_transport!=NULL){
+          // ieee1888_dump_objects((ieee1888_object*)rs_transport);
+	}
+      }
+
+      if(rq_transport!=NULL){
+        ieee1888_destroy_objects((ieee1888_object*)rq_transport);
+        free(rq_transport);
+      }
+      if(rs_transport!=NULL){
+        ieee1888_destroy_objects((ieee1888_object*)rs_transport);
+        free(rs_transport);
+      }
+      bacnetipGW_log("bacnetipGW_writeClient_thread_WRITE(end)\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+    }else{
+      bacnetipGW_log("bacnetipGW_writeClient_thread: no WRITE client operation because of the failure of bacnetipGW_ieee1888read\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+    }
+
+  }
+}
+
+void* bacnetipGW_fetchClient_thread(void* args){
+  
+  // if no points to work on --> return
+  if(n_m_fetchClient_ids==0){
+    return NULL;
+  }
+
+  int i;
+  sleep(10); // wait at the startup
+  time_t last_download=0;
+
+  // int counter=0; // for debug
+
+  while(1){
+
+    // time check interval: 1 seconds
+    sleep(1);
+
+    time_t now=time(NULL);
+    if((last_download-m_fetchClient_trigger_offset)/m_fetchClient_trigger_frequency
+           ==(now-m_fetchClient_trigger_offset)/m_fetchClient_trigger_frequency ){
+      continue;
+    }
+    // for debug
+    // printf("count:%d\n",counter++);
+    
+    last_download=now;
+
+    ieee1888_key* keys=ieee1888_mk_key_array(n_m_fetchClient_ids);
+    int n_keys=n_m_fetchClient_ids;
+    for(i=0;i<n_keys;i++){
+      keys[i].id=ieee1888_mk_uri(m_fetchClient_ids[i]);
+      keys[i].attrName=ieee1888_mk_string("time");
+      keys[i].select=ieee1888_mk_string("maximum");
+    }
+
+    // fetch the data (cursor function is not implemented)
+    bacnetipGW_log("bacnetipGW_fetchClient_thread_FETCH(begin)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    ieee1888_transport* rq_transport=ieee1888_mk_transport();
+    ieee1888_header* rq_header=ieee1888_mk_header();
+    ieee1888_query* rq_query=ieee1888_mk_query();
+    rq_transport->header=rq_header;
+    rq_header->query=rq_query;
+    rq_query->type=ieee1888_mk_string("storage");
+    rq_query->id=ieee1888_mk_new_uuid();
+    rq_query->key=keys;
+    rq_query->n_key=n_keys;
+
+    ieee1888_transport* rs_transport=ieee1888_client_query(rq_transport,m_fetchClient_ieee1888_server_url,NULL,NULL);
+    if(rs_transport!=NULL && rs_transport->header!=NULL && rs_transport->header->OK!=NULL && rs_transport->body!=NULL){
+      bacnetipGW_log("fetchClient success.\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+      ieee1888_body* rs_body=rs_transport->body;
+      ieee1888_point* rs_point=rs_body->point;
+      int n_rs_point=rs_body->n_point;
+
+      ieee1888_error* local_error=bacnetipGW_ieee1888write(rs_point,n_rs_point);
+      if(local_error!=NULL){
+         ieee1888_destroy_objects((ieee1888_object*)local_error);
+         free(local_error); 
+      }
+
+    }else{
+      bacnetipGW_log("fetchClient failure.\n", IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+      // fprintf(stdout," this ==> server \n");
+      if(rq_transport!=NULL){
+        // ieee1888_dump_objects((ieee1888_object*)rq_transport);
+      }
+      // fprintf(stdout," this <== server \n");
+      if(rs_transport!=NULL){
+        // ieee1888_dump_objects((ieee1888_object*)rs_transport);
+      }
+    }
+
+    if(rq_transport!=NULL){
+      ieee1888_destroy_objects((ieee1888_object*)rq_transport);
+      free(rq_transport);
+    }
+    if(rs_transport!=NULL){
+      ieee1888_destroy_objects((ieee1888_object*)rs_transport);
+      free(rs_transport);
+    }
+    bacnetipGW_log("bacnetipGW_fetchClient_thread_FETCH(end)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+  }
+}
+
+int bacnetipGW_readConfig(const char* configPath){
+
+  int i,k;
+
+  bacnetipGW_log("bacnetipGW_readConfig(begin)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+    
+  // initialize the memory space
+  memset(m_config,0,sizeof(m_config));
+  n_m_config=0;
+
+  memset(m_writeServer_ids,0,sizeof(m_writeServer_ids));
+  memset(m_fetchServer_ids,0,sizeof(m_fetchServer_ids));
+  memset(m_writeClient_ids,0,sizeof(m_writeClient_ids));
+  memset(m_fetchClient_ids,0,sizeof(m_fetchClient_ids));
+  n_m_writeServer_ids=0;
+  n_m_fetchServer_ids=0;
+  n_m_writeClient_ids=0;
+  n_m_fetchClient_ids=0;
+
+  memset(m_writeClient_ieee1888_server_url,0,sizeof(m_writeClient_ieee1888_server_url));
+  m_writeClient_trigger_frequency=0;
+  m_writeClient_trigger_offset=0;
+
+  memset(m_fetchClient_ieee1888_server_url,0,sizeof(m_fetchClient_ieee1888_server_url));
+  m_fetchClient_trigger_frequency=0;
+  m_fetchClient_trigger_offset=0;
+
+  m_datapool_timespan=60;
+
+  // open file
+  FILE* fp=fopen(configPath,"r");
+  if(fp==NULL){
+    bacnetipGW_log("Failed to read the configFile\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+    return IEEE1888_BACNETIP_ERROR;
+  }
+
+  // read a line
+  char line[2048];
+  while(fgets(line,2048,fp)!=NULL){
+    
+    // eats spaces, tabs, etc..
+    int len=strlen(line);
+    for(i=0,k=0;i<len;i++){
+      if(line[i]<=(char)0x20){
+        continue;
+      }
+      if(k<i){
+        line[k]=line[i];
+      }
+      k++;
+    }
+    line[k]='\0';
+  
+    // parse 
+    char* cp=line;
+    char* columns[10];
+    int n_columns;
+    for(i=0;i<10;i++){
+      if((columns[i]=strtok(cp,","))==NULL){
+        break;
+      }
+      cp=NULL;
+    }
+    n_columns=i;
+  
+    // DEBUG code
+    //int d;
+    //printf("DEBUG: %s: ",cp);
+    //for(d=0;d<n_columns;d++){
+    //  printf("%s ",columns[d]);
+    //}
+    //printf("\n");
+  
+    // parse in detail and push into the memory space
+    if(n_columns>=1){
+
+      if(strcmp("PRINTSTATUS_PATH",columns[0])==0){
+        strcpy(m_printStatus_filepath,columns[1]);
+
+      }else if(strcmp("DATAPOOL_TIMESPAN_MIN",columns[0])==0){
+        m_datapool_timespan=atoi(columns[1]);
+
+      }else if(strcmp("BIF",columns[0])==0){
+        if(n_columns!=9){
+          bacnetipGW_log("Too many columns found in BIF\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+	}
+
+        struct bacnetipGW_baseConfig conf;
+        memset(&conf,0,sizeof(conf));
+        if(strlen(columns[1])>=IEEE1888_BACNETIP_POINTID_LEN){
+          bacnetipGW_log("The length of point id (in BIF) is too long\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+        strcpy(conf.point_id,columns[1]);
+
+        if(strlen(columns[2])>=IEEE1888_BACNETIP_HOSTNAME_LEN){
+          bacnetipGW_log("The length of hostname (in BIF) is too long\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+        strcpy(conf.host,columns[2]);
+
+        if(strtol(columns[3],NULL,0)<1 || strtol(columns[3],NULL,0)>=65536){
+          bacnetipGW_log("Invalid port number is specified in BIF\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+        conf.port=(uint16_t)strtol(columns[3],NULL,0);
+        conf.object_id=(uint32_t)strtol(columns[4],NULL,0);
+        
+        if(strtol(columns[5],NULL,0)<1 || strtol(columns[5],NULL,0)>=256){
+          bacnetipGW_log("Invalid property id is specified in BIF\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+        conf.property_id=(uint8_t)strtol(columns[5],NULL,0);
+	
+        if(strcmp("BOOLEAN",columns[6])==0){
+          conf.data_type=1; // BACNET_DATATYPE_BOOLEAN;
+        }else if(strcmp("UNSIGNED",columns[6])==0){
+          conf.data_type=BACNET_DATATYPE_UNSIGNED_INT;
+        }else if(strcmp("SIGNED",columns[6])==0){
+          conf.data_type=BACNET_DATATYPE_SIGNED_INT;
+        }else if(strcmp("REAL",columns[6])==0){
+          conf.data_type=BACNET_DATATYPE_REAL;
+        }else if(strcmp("STRING",columns[6])==0){
+          conf.data_type=BACNET_DATATYPE_CHARACTER_STRING;
+        }else if(strcmp("ENUM",columns[6])==0){
+          conf.data_type=BACNET_DATATYPE_ENUMERATED;
+        }else if(strcmp("",columns[6])==0){
+          bacnetipGW_log("Unknown data_type is specifed in BIF (only BOOLEAN, UNSIGNED, SIGNED, REAL, STRING, ENUM are allowed)\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+
+        if(strcmp("R",columns[7])==0){
+          conf.permission=IEEE1888_BACNETIP_ACCESS_READ;
+        }else if(strcmp("W",columns[7])==0){
+          conf.permission=IEEE1888_BACNETIP_ACCESS_WRITE;
+        }else if(strcmp("RW",columns[7])==0){
+          conf.permission=IEEE1888_BACNETIP_ACCESS_READ | IEEE1888_BACNETIP_ACCESS_WRITE;
+        }else if(strcmp("",columns[7])==0){
+          conf.permission=IEEE1888_BACNETIP_ACCESS_NONE;
+        }else{
+          bacnetipGW_log("Unknown access permission is specifed in BIF (only R, W, RW are allowed)\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+        int exp=atoi(columns[8]);
+        if(exp<-5 || exp>5){
+          bacnetipGW_log("Invalid exponential specification  (it should be between -5 and 5)\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+        conf.exp=exp;
+
+        memcpy(&m_config[n_m_config++],&conf,sizeof(struct bacnetipGW_baseConfig));
+
+      }else if(strcmp("WSP",columns[0])==0){
+        struct bacnetipGW_baseConfig* conf;
+        if(bacnetipGW_findConfig(columns[1],&conf)==IEEE1888_BACNETIP_OK){
+          if(conf->permission&IEEE1888_BACNETIP_ACCESS_WRITE){
+            strcpy(m_writeServer_ids[n_m_writeServer_ids++],columns[1]);
+          }else{
+            char logbuf[1024];
+            sprintf(logbuf,"Point id at %s,%s has no write permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+            fclose(fp); return IEEE1888_BACNETIP_ERROR;
+          }
+        }else{
+          char logbuf[1024];
+          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+
+      }else if(strcmp("FSP",columns[0])==0){
+        struct bacnetipGW_baseConfig* conf;
+        if(bacnetipGW_findConfig(columns[1],&conf)==IEEE1888_BACNETIP_OK){
+          if(conf->permission&IEEE1888_BACNETIP_ACCESS_READ){
+            strcpy(m_fetchServer_ids[n_m_fetchServer_ids++],columns[1]);
+          }else{
+            char logbuf[1024];
+            sprintf(logbuf,"Point id at %s,%s has no read permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+            fclose(fp); return IEEE1888_BACNETIP_ERROR;
+          }
+        }else{
+          char logbuf[1024];
+          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+
+      }else if(strcmp("WCM",columns[0])==0){
+        strcpy(m_writeClient_ieee1888_server_url,columns[1]);
+        m_writeClient_trigger_frequency=atoi(columns[2]);
+        m_writeClient_trigger_offset=atoi(columns[3]);
+
+      }else if(strcmp("WCP",columns[0])==0){
+        struct bacnetipGW_baseConfig* conf;
+        if(bacnetipGW_findConfig(columns[1],&conf)==IEEE1888_BACNETIP_OK){
+          if(conf->permission&IEEE1888_BACNETIP_ACCESS_READ){
+            strcpy(m_writeClient_ids[n_m_writeClient_ids++],columns[1]);
+          }else{
+            char logbuf[1024];
+            sprintf(logbuf,"Point id at %s,%s has no read permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+            fclose(fp); return IEEE1888_BACNETIP_ERROR;
+          }
+        }else{
+          char logbuf[1024];
+          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+
+      }else if(strcmp("FCM",columns[0])==0){
+        strcpy(m_fetchClient_ieee1888_server_url,columns[1]);
+        m_fetchClient_trigger_frequency=atoi(columns[2]);
+        m_fetchClient_trigger_offset=atoi(columns[3]);
+    
+      }else if(strcmp("FCP",columns[0])==0){
+        struct bacnetipGW_baseConfig* conf;
+        if(bacnetipGW_findConfig(columns[1],&conf)==IEEE1888_BACNETIP_OK){
+          if(conf->permission&IEEE1888_BACNETIP_ACCESS_WRITE){
+            strcpy(m_fetchClient_ids[n_m_fetchClient_ids++],columns[1]);
+          }else{
+            char logbuf[1024];
+            sprintf(logbuf,"Point id at %s,%s has no write permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+            fclose(fp); return IEEE1888_BACNETIP_ERROR;
+          }
+        }else{
+          char logbuf[1024];
+          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+          fclose(fp); return IEEE1888_BACNETIP_ERROR;
+        }
+      }
+
+      // error check
+      if(n_m_config>IEEE1888_BACNETIP_POINT_COUNT){
+        bacnetipGW_log("ERROR: too many BIFs\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        fclose(fp); return IEEE1888_BACNETIP_ERROR;
+      }
+      if(n_m_writeServer_ids>IEEE1888_BACNETIP_POINT_COUNT){
+        bacnetipGW_log("ERROR: too many writeServer ids\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        fclose(fp); return IEEE1888_BACNETIP_ERROR;
+      }
+      if(n_m_fetchServer_ids>IEEE1888_BACNETIP_POINT_COUNT){
+        bacnetipGW_log("ERROR: too many fetchServer ids\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        fclose(fp); return IEEE1888_BACNETIP_ERROR;
+      }
+      if(n_m_writeClient_ids>IEEE1888_BACNETIP_POINT_COUNT){
+        bacnetipGW_log("ERROR: too many writeClient ids\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        fclose(fp); return IEEE1888_BACNETIP_ERROR;
+      }
+      if(n_m_fetchClient_ids>IEEE1888_BACNETIP_POINT_COUNT){
+        bacnetipGW_log("ERROR: too many fetchClient ids",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        fclose(fp); return IEEE1888_BACNETIP_ERROR;
+      }
+    
+    }
+  }
+
+  // close the file
+  fclose(fp);
+  
+  bacnetipGW_log("bacnetipGW_readConfig(end)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+  return IEEE1888_BACNETIP_OK;
+}
+
+void bacnetipGW_printStatus(FILE* fp){
+  
+  bacnetipGW_log("bacnetipGW_printStatus(begin)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+  
+  fprintf(fp,"<html><header><title>IEEE1888 - BACnet/IP GW Status Page</title>\n");
+  fprintf(fp,"<style type=\"text/css\">\n");
+  fprintf(fp,"#header  {BACKGROUND-COLOR:#99ffcc; TEXT-ALIGN:CENTER;} \n");
+  fprintf(fp,"#oddrow  {BACKGROUND-COLOR:#f0f0ff; TEXT-ALIGN:LEFT;}   \n");
+  fprintf(fp,"#evenrow {BACKGROUND-COLOR:#f8f8ff; TEXT-ALIGN:LEFT;} \n");
+  fprintf(fp,"</style></header><body>\n");
+  fprintf(fp,"<h1>IEEE1888 - BACnet/IP GW Status Page</h1>\n");
+  fprintf(fp,"<table border=\"2\">");
+  fprintf(fp,"<tr id=\"header\">\n");
+  fprintf(fp,"<td>IEEE1888 Point ID</td>\n");
+  fprintf(fp,"<td>BACnet/IP HostName</td>\n");
+  fprintf(fp,"<td>UDP Port</td>\n");
+  fprintf(fp,"<td>Object ID</td>\n");
+  fprintf(fp,"<td>Property ID</td>\n");
+  fprintf(fp,"<td>Type</td>\n");
+  fprintf(fp,"<td>Permission</td>\n");
+  fprintf(fp,"<td>Multiply by</td>\n");
+  fprintf(fp,"<td>Time</td>\n");
+  fprintf(fp,"<td>Value</td>\n");
+  fprintf(fp,"</tr>\n");
+
+  fflush(fp);
+ 
+  int i; 
+  for(i=0;i<n_m_config;i++){
+    struct bacnetipGW_baseConfig* p=&m_config[i];
+    char sdatatype[10];
+    char spermission[10];
+    char stime[40];
+    struct tm tm_time;
+    char style[20];
+    if(i%2==0){
+      strcpy(style,"evenrow");
+    }else{
+      strcpy(style,"oddrow");
+    }
+    switch(p->data_type){
+    case BACNET_DATATYPE_BOOLEAN: strcpy(sdatatype,"BOOLEAN"); break;
+    case BACNET_DATATYPE_UNSIGNED_INT: strcpy(sdatatype,"UNSIGNED"); break;
+    case BACNET_DATATYPE_SIGNED_INT:   strcpy(sdatatype,"SIGNED"); break;
+    case BACNET_DATATYPE_REAL: 	       strcpy(sdatatype,"REAL"); break;
+    case BACNET_DATATYPE_CHARACTER_STRING:  strcpy(sdatatype,"STRING"); break;
+    case BACNET_DATATYPE_ENUMERATED:        strcpy(sdatatype,"ENUM");   break;
+    default: strcpy(sdatatype,"ERROR");
+    }
+    switch(p->permission){
+    case IEEE1888_BACNETIP_ACCESS_READ: strcpy(spermission,"R"); break;
+    case IEEE1888_BACNETIP_ACCESS_WRITE: strcpy(spermission,"W"); break;
+    case IEEE1888_BACNETIP_ACCESS_READ | IEEE1888_BACNETIP_ACCESS_WRITE: 
+       strcpy(spermission,"RW"); break;
+    default: strcpy(spermission,"ERROR");
+    }
+    localtime_r(&(p->status_time),&tm_time);
+    if(p->status_time!=0){
+      strftime(stime,40,"%Y-%m-%d %H:%M:%S",&tm_time);
+    }else{
+      stime[0]=' ';
+      stime[1]='\0';
+    }
+
+    fprintf(fp,"<tr id=\"%s\">\n",style);
+    fprintf(fp,"<td>%s</td>\n",p->point_id);
+    fprintf(fp,"<td>%s</td>\n",p->host);
+    fprintf(fp,"<td>%05d</td>\n",p->port);
+    fprintf(fp,"<td>0x%08lx</td>\n",p->object_id);
+    fprintf(fp,"<td>0x%02x</td>\n",p->property_id);
+    fprintf(fp,"<td>%s</td>\n",sdatatype);
+    fprintf(fp,"<td>%s</td>\n",spermission);
+    fprintf(fp,"<td>10^%d</td>\n",p->exp);
+    fprintf(fp,"<td>%s</td>\n",stime);
+    if(strlen(p->status_value)==0){
+      fprintf(fp,"<td> </td>\n");
+    }else{
+      fprintf(fp,"<td>%s</td>\n",p->status_value);
+    }
+    fprintf(fp,"</tr>\n");
+  }
+  fprintf(fp,"</table></body></html>");
+  
+  bacnetipGW_log("bacnetipGW_printStatus(end)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+}
+
+void* bacnetipGW_printStatus_thread(void* args){
+  
+  while(strlen(m_printStatus_filepath)>0){
+    FILE* fp=fopen(m_printStatus_filepath,"w");
+    if(fp){
+      bacnetipGW_printStatus(fp);
+      fclose(fp);
+    }
+    sleep(30);
+  }
+}
+
+
+void bacnetipGW_printConfig(FILE* fp){
+
+  int i;
+  bacnetipGW_log("bacnetipGW_printConfig(begin)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+
+  fprintf(fp,"PRINTSTATUS_PATH,%s\n",m_printStatus_filepath);  
+  fprintf(fp,"DATAPOOL_TIMESPAN_MIN,%d\n",m_datapool_timespan);  
+
+  for(i=0;i<n_m_config;i++){
+    struct bacnetipGW_baseConfig* p=&m_config[i];
+    char sdatatype[10];
+    char spermission[10];
+    switch(p->data_type){
+    case 1/* BACNET_DATATYPE_BOOLEAN*/: strcpy(sdatatype,"BOOLEAN"); break;
+    case BACNET_DATATYPE_UNSIGNED_INT: strcpy(sdatatype,"UNSIGNED"); break;
+    case BACNET_DATATYPE_SIGNED_INT:   strcpy(sdatatype,"SIGNED"); break;
+    case BACNET_DATATYPE_REAL: 	       strcpy(sdatatype,"REAL"); break;
+    case BACNET_DATATYPE_CHARACTER_STRING:  strcpy(sdatatype,"STRING"); break;
+    case BACNET_DATATYPE_ENUMERATED:        strcpy(sdatatype,"ENUM");   break;
+    default: strcpy(sdatatype,"ERROR");
+    }
+    switch(p->permission){
+    case IEEE1888_BACNETIP_ACCESS_READ: strcpy(spermission,"R"); break;
+    case IEEE1888_BACNETIP_ACCESS_WRITE: strcpy(spermission,"W"); break;
+    case IEEE1888_BACNETIP_ACCESS_READ | IEEE1888_BACNETIP_ACCESS_WRITE: 
+       strcpy(spermission,"RW"); break;
+    default: strcpy(spermission,"ERROR");
+    }
+
+    fprintf(fp,"BIF,%s,%s,%d,0x%08lx,0x%02x,%s,%s,%d\n",p->point_id,p->host,p->port,p->object_id,p->property_id,sdatatype,spermission,p->exp);
+  }
+  
+  for(i=0;i<n_m_writeServer_ids;i++){
+    fprintf(fp,"WSP,%s\n",m_writeServer_ids[i]);
+  }
+  for(i=0;i<n_m_fetchServer_ids;i++){
+    fprintf(fp,"FSP,%s\n",m_fetchServer_ids[i]);
+  }
+  fprintf(fp,"WCM,%s,%d,%d\n",m_writeClient_ieee1888_server_url,m_writeClient_trigger_frequency,m_writeClient_trigger_offset);
+
+  for(i=0;i<n_m_writeClient_ids;i++){
+    fprintf(fp,"WCP,%s\n",m_writeClient_ids[i]);
+  }
+  fprintf(fp,"FCM,%s,%d,%d\n",m_fetchClient_ieee1888_server_url,m_fetchClient_trigger_frequency,m_fetchClient_trigger_offset);
+  for(i=0;i<n_m_fetchClient_ids;i++){
+    fprintf(fp,"FCP,%s\n",m_fetchClient_ids[i]);
+  }
+  bacnetipGW_log("bacnetipGW_printConfig(end)\n", IEEE1888_BACNETIP_LOGLEVEL_INFO);
+}
+
+/**
+ * LogManager
+ *
+ */
+char bacnetipGW_logPath[256];
+int bacnetipGW_logLevel_Threshold;
+pthread_mutex_t bacnetipGW_log_mx;
+
+void bacnetipGW_log(const char* logMessage, int logLevel){
+  if(logLevel>=bacnetipGW_logLevel_Threshold){
+    pthread_mutex_lock(&bacnetipGW_log_mx);
+    FILE* fp=fopen(bacnetipGW_logPath,"a");
+    if(fp!=NULL){
+
+      switch(logLevel){
+      case IEEE1888_BACNETIP_LOGLEVEL_DEBUG: fprintf(fp,"[DEBUG] "); break;
+      case IEEE1888_BACNETIP_LOGLEVEL_INFO:  fprintf(fp,"[INFO]  "); break;
+      case IEEE1888_BACNETIP_LOGLEVEL_WARN:  fprintf(fp,"[WARN]  "); break;
+      case IEEE1888_BACNETIP_LOGLEVEL_ERROR: fprintf(fp,"[ERROR] "); break;
+      default:                               fprintf(fp,"[-----] ");
+      }
+      fprintf(fp,"%s",logMessage);
+      fclose(fp);
+    }
+    pthread_mutex_unlock(&bacnetipGW_log_mx);
+  }
+}
+
+/*
+ * Initializer
+ */ 
+int bacnetipGW_init(const char* configPath, const char* logPath, const char* dpPath){
+  
+  strncpy(bacnetipGW_logPath,logPath,256);
+  bacnetipGW_logLevel_Threshold=IEEE1888_BACNETIP_LOGLEVEL_INFO;
+
+  bacnetipGW_log("bacnetipGW_init (begin) \n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+  
+  int ret=bacnetipGW_readConfig(configPath);
+  if(ret!=IEEE1888_BACNETIP_OK){
+    return ret;
+  }
+
+  // bacnetipGW_printConfig(stdout);
+  
+  if(n_m_writeClient_ids>0 && m_writeClient_trigger_frequency>0){
+    ieee1888_datapool_init(dpPath,m_writeClient_ieee1888_server_url,m_datapool_timespan);
+    pthread_create(&__bacnetipGW_writeClient_thread,0,bacnetipGW_writeClient_thread,0);
+  }
+
+  if(n_m_fetchClient_ids>0 && m_fetchClient_trigger_frequency>0){
+    pthread_create(&__bacnetipGW_fetchClient_thread,0,bacnetipGW_fetchClient_thread,0);
+  }
+
+  // print status thread
+  pthread_create(&__bacnetipGW_printStatus_thread,0,bacnetipGW_printStatus_thread,0);
+
+  bacnetipGW_log("bacnetipGW_init (end) \n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
+  return IEEE1888_BACNETIP_OK;
+}
+
+void bacnetipGW_printUsage(){
+  printf("Usage: ieee1888_bacnetip_gw -c CONFIG_PATH -l LOG_PATH -p DATAPOOL_PATH\n\n");
+}
+
+int main(int argc, char* argv[]){
+
+  if(argc!=7){
+    bacnetipGW_printUsage();
+    return 1;
+  }
+
+  if(   strcmp(argv[1],"-c")!=0
+     || strcmp(argv[3],"-l")!=0
+     || strcmp(argv[5],"-p")!=0){
+    bacnetipGW_printUsage();
+    return 1;
+  }
+
+  if(bacnetipGW_init(argv[2],argv[4],argv[6])==IEEE1888_BACNETIP_OK){
+
+    ieee1888_set_service_handlers(bacnetipGW_ieee1888_server_query,bacnetipGW_ieee1888_server_data);
+    int ret=ieee1888_server_create(1888);
+    return ret;
+  }
+   
+  return IEEE1888_BACNETIP_ERROR;
+}
