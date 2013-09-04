@@ -1,7 +1,12 @@
+all: test-sparsexml
+
 sparsexml.o: sparsexml.c
 	$(CC) -g -O0 -c $<
 
-clean: sparsexml.o
+test-sparsexml: sparsexml.o test.c
+	$(CC) -g -o $@ $^ -lcunit
+
+clean: sparsexml.o test-sparsexml
 	rm $<
 
-.PHONY: clean
+.PHONY: clean all
