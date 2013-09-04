@@ -10,17 +10,17 @@ unsigned char priv_sxml_change_parser_state(SXMLParser* parser, enum SXMLParserS
   int i;
 
   if (strlen(parser->buffer) > 0) {
-    if (parser->state == IN_TAG && state == IN_CONTENT) {
+    if (parser->state == IN_TAG && state == IN_CONTENT && parser->tag_func != NULL) {
       ret = parser->tag_func(parser->buffer);
-    } else if (parser->state == IN_TAG && state == IN_TAG ) {
+    } else if (parser->state == IN_TAG && state == IN_TAG && parser->tag_func != NULL) {
       ret = parser->tag_func(parser->buffer);
-    } else if (parser->state == IN_TAG && state == IN_ATTRIBUTE_KEY) {
+    } else if (parser->state == IN_TAG && state == IN_ATTRIBUTE_KEY && parser->tag_func != NULL) {
       ret = parser->tag_func(parser->buffer);
-    } else if (parser->state == IN_CONTENT && state == IN_TAG) {
+    } else if (parser->state == IN_CONTENT && state == IN_TAG && parser->content_func != NULL) {
       ret = parser->content_func(parser->buffer);
-    } else if (parser->state == IN_ATTRIBUTE_KEY && state == IN_ATTRIBUTE_VALUE) {
+    } else if (parser->state == IN_ATTRIBUTE_KEY && state == IN_ATTRIBUTE_VALUE && parser->attribute_key_func != NULL) {
       ret = parser->attribute_key_func(parser->buffer);
-    } else if (parser->state == IN_ATTRIBUTE_VALUE && state == IN_TAG) {
+    } else if (parser->state == IN_ATTRIBUTE_VALUE && state == IN_TAG && parser->attribute_value_func != NULL) {
       ret = parser->attribute_value_func(parser->buffer);
     }
   }
@@ -40,10 +40,6 @@ void sxml_init_parser(SXMLParser* parser) {
   parser->state = INITIAL;
   parser->bp = 0;
   parser->buffer[0] = '\0';
-  for (i=0; i<SXMLNumberOfElements; i++) {
-    parser->elements[i][0] = '\0';
-  }
-
 }
 
 void sxml_register_func(SXMLParser* parser, void* open, void* content, void* attribute_key, void* attribute_value) {
@@ -58,13 +54,17 @@ unsigned char sxml_run_parser(SXMLParser* parser, char * xml) {
   unsigned char ret = SXMLParserContinue;
 
   do {
+
+#ifdef __DEBUG1
+    printf("State:%d Buffer:%s Char:%c\r\n", parser->state, parser->buffer, *xml);
+#endif
+
     switch (parser->state) {
       case INITIAL:
         switch (*xml) {
           case '<':
             ret = priv_sxml_change_parser_state(parser, IN_TAG);
             continue;
-            break;
         }
         break;
       case IN_TAG:
@@ -72,11 +72,9 @@ unsigned char sxml_run_parser(SXMLParser* parser, char * xml) {
           case '>':
             ret =  priv_sxml_change_parser_state(parser, IN_CONTENT);
             continue;
-            break;
           case ' ':
             ret = priv_sxml_change_parser_state(parser, IN_ATTRIBUTE_KEY);
             continue;
-            break;
         }
         break;
       case IN_ATTRIBUTE_KEY:
@@ -84,19 +82,17 @@ unsigned char sxml_run_parser(SXMLParser* parser, char * xml) {
           case '>':
             ret = priv_sxml_change_parser_state(parser, IN_CONTENT);
             continue;
-            break;
-          case '=':
-            xml++;
+          case '"':
+            parser->bp--;
+            parser->buffer[parser->bp] = '\0';
             ret = priv_sxml_change_parser_state(parser, IN_ATTRIBUTE_VALUE);
             continue;
-            break;
         }
       case IN_ATTRIBUTE_VALUE:
         switch (*xml) {
           case '"':
             ret = priv_sxml_change_parser_state(parser, IN_TAG);
             continue;
-            break;
         }
         break;
       case IN_CONTENT:
@@ -104,18 +100,14 @@ unsigned char sxml_run_parser(SXMLParser* parser, char * xml) {
           case '<':
             ret = priv_sxml_change_parser_state(parser, IN_TAG);
             continue;
-            break;
         }
         break;
     }
     parser->buffer[parser->bp++] = *xml;
     parser->buffer[parser->bp] = '\0';
 
-#ifdef __DEBUG1
-    printf("State:%d Buffer:%s\r\n", parser->state, parser->buffer);
-#endif
 
-  } while (*(xml++) != '\0' && ret == SXMLParserContinue);
+  } while (*(++xml) != '\0' && ret == SXMLParserContinue);
 
   if (ret == SXMLParserStop) {
     return SXMLParserInterrupted;

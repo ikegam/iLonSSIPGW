@@ -15,14 +15,12 @@ enum SXMLParserState {
 #define SXMLParserComplete 0x02
 #define SXMLParserInterrupted 0x03
 
-#define SXMLNumberOfElements 10
 #define SXMLElementLength 1024
 
 typedef struct __SXMLParser {
   enum SXMLParserState state;
 
   unsigned char buffer[SXMLElementLength];
-  unsigned char elements[SXMLNumberOfElements][SXMLElementLength];
   unsigned int bp;
 
   unsigned char (*tag_func)(char *);
