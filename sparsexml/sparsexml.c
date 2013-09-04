@@ -40,7 +40,7 @@ void sxml_init_parser(SXMLParser* parser) {
   parser->state = INITIAL;
   parser->bp = 0;
   parser->buffer[0] = '\0';
-  for (i=0; i<10; i++) {
+  for (i=0; i<SXMLNumberOfElements; i++) {
     parser->elements[i][0] = '\0';
   }
 
