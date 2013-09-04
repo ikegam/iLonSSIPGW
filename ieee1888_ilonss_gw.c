@@ -166,155 +166,155 @@ int bacnetipGW_bacnetRead(char ids[][IEEE1888_BACNETIP_POINTID_LEN], time_t time
       struct bacnet_data bdata;
       bdata.type=BACNET_DATATYPE_NULL;
       if(BACNET_OK == readProperty(config->host,config->port,
-               		   config->object_id,config->property_id,
-                           &bdata) ){
+            config->object_id,config->property_id,
+            &bdata) ){
 
-	char value[IEEE1888_BACNETIP_VALUE_LEN];
-	memset(value,0,sizeof(value));
+        char value[IEEE1888_BACNETIP_VALUE_LEN];
+        memset(value,0,sizeof(value));
 
         // Translation into string
-	switch(bdata.type){
-        case BACNET_DATATYPE_NULL:
-          value[0]=0;
-          break;
+        switch(bdata.type){
+          case BACNET_DATATYPE_NULL:
+            value[0]=0;
+            break;
 
-        case BACNET_DATATYPE_BOOLEAN:
-          if(bdata.value_boolean){
-            sprintf(value,"1");
-          }else{
-            sprintf(value,"0");
-          }
-          break;
+          case BACNET_DATATYPE_BOOLEAN:
+            if(bdata.value_boolean){
+              sprintf(value,"1");
+            }else{
+              sprintf(value,"0");
+            }
+            break;
 
-	case BACNET_DATATYPE_UNSIGNED_INT: 
-	  sprintf(value,"%u",bdata.value_unsigned);
-	  break;
+          case BACNET_DATATYPE_UNSIGNED_INT: 
+            sprintf(value,"%u",bdata.value_unsigned);
+            break;
 
-	case BACNET_DATATYPE_SIGNED_INT:
-	  sprintf(value,"%d",bdata.value_signed);
-	  break;
+          case BACNET_DATATYPE_SIGNED_INT:
+            sprintf(value,"%d",bdata.value_signed);
+            break;
 
-	case BACNET_DATATYPE_REAL:
-          {
-            int e;
-            float value_real=bdata.value_real;
-            for(e=0;e<config->exp;e++){ value_real*=10.0; }
-            for(e=0;e<-config->exp;e++){ value_real/=10.0; }
-	    sprintf(value,"%f",value_real);
-          }
-	  break;
+          case BACNET_DATATYPE_REAL:
+            {
+              int e;
+              float value_real=bdata.value_real;
+              for(e=0;e<config->exp;e++){ value_real*=10.0; }
+              for(e=0;e<-config->exp;e++){ value_real/=10.0; }
+              sprintf(value,"%f",value_real);
+            }
+            break;
 
-	case BACNET_DATATYPE_CHARACTER_STRING:
-	  sprintf(value,"%s",bdata.value_str);
-	  break;
+          case BACNET_DATATYPE_CHARACTER_STRING:
+            sprintf(value,"%s",bdata.value_str);
+            break;
 
-	case BACNET_DATATYPE_ENUMERATED:
-	  sprintf(value,"%d",bdata.value_enum);
-	  break;
+          case BACNET_DATATYPE_ENUMERATED:
+            sprintf(value,"%d",bdata.value_enum);
+            break;
 
-	default:
-	  sprintf(value,"err (unsupported:%d)",bdata.type);
-          {
-            char logbuf[1000];
-            sprintf(logbuf,"Unsupported datatype=%d\n",bdata.type);
-            bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
-          }
-	}
+          default:
+            sprintf(value,"err (unsupported:%d)",bdata.type);
+            {
+              char logbuf[1000];
+              sprintf(logbuf,"Unsupported datatype=%d\n",bdata.type);
+              bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
+            }
+        }
 
         // debug code
-	//printf("raw=%s\n",value); fflush(stdout);
+        //printf("raw=%s\n",value); fflush(stdout);
 
 
         if( bdata.type==BACNET_DATATYPE_UNSIGNED_INT
-         || bdata.type==BACNET_DATATYPE_SIGNED_INT){
+            || bdata.type==BACNET_DATATYPE_SIGNED_INT){
           // multiply (10^exp)
-	  if(config->exp<0){ // insert "." at the end (-exp) of value (add 0 in front of value in some cases)
+          if(config->exp<0){ // insert "." at the end (-exp) of value (add 0 in front of value in some cases)
 
             if(value[0]!='-'){
-	      // if the value is non negative
-	      int len=strlen(value);
+              // if the value is non negative
+              int len=strlen(value);
               int dot_index=len+config->exp;
-	      if(dot_index>0){
-	        if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
-	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-	        }
-	        int k;
+              if(dot_index>0){
+                if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
+                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+                }
+                int k;
                 for(k=len;k>dot_index;k--){
                   value[k]=value[k-1];
-	        }
-	        value[dot_index]='.';
-	      }else{
-	        int k;
-	        int shift=1-dot_index;
-	        if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
-	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-	        }
-	        for(k=len-1;k>=0;k--){
-	          value[k+shift]=value[k];
-	        }
-	        for(k=0;k<shift;k++){
-	          value[k]='0';
-	        }
-	        for(k=len+shift;k>1;k--){
+                }
+                value[dot_index]='.';
+              }else{
+                int k;
+                int shift=1-dot_index;
+                if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
+                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+                }
+                for(k=len-1;k>=0;k--){
+                  value[k+shift]=value[k];
+                }
+                for(k=0;k<shift;k++){
+                  value[k]='0';
+                }
+                for(k=len+shift;k>1;k--){
                   value[k]=value[k-1];
-	        }
-	        value[1]='.';
-	      }
-	    }else{
-	      // if the value is negative
-	      int len=strlen(value);
-	      int dot_index=len+config->exp;
-	      if(dot_index>1){
-	        if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
-	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-	        }
-	        int k;
+                }
+                value[1]='.';
+              }
+            }else{
+              // if the value is negative
+              int len=strlen(value);
+              int dot_index=len+config->exp;
+              if(dot_index>1){
+                if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
+                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+                }
+                int k;
                 for(k=len;k>dot_index;k--){
                   value[k]=value[k-1];
-	        }
-	        value[dot_index]='.';
-	      }else{
-	        int k;
-	        int shift=2-dot_index;
-	        if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
-	          return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-	        }
-	        for(k=len-1;k>=1;k--){
-	          value[k+shift]=value[k];
-	        }
-	        for(k=1;k<shift+1;k++){
-	          value[k]='0';
-	        }
-	        for(k=len+shift+1;k>2;k--){
+                }
+                value[dot_index]='.';
+              }else{
+                int k;
+                int shift=2-dot_index;
+                if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
+                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
+                }
+                for(k=len-1;k>=1;k--){
+                  value[k+shift]=value[k];
+                }
+                for(k=1;k<shift+1;k++){
+                  value[k]='0';
+                }
+                for(k=len+shift+1;k>2;k--){
                   value[k]=value[k-1];
-	        }
-	        value[2]='.';
-	      }
-	    }
-          
-	  }else if(config->exp>0){  // add "0" exp times in the end of value
-	    int len=strlen(value);
-	    if(len==1 && value[0]=='0'){
+                }
+                value[2]='.';
+              }
+            }
+
+          }else if(config->exp>0){  // add "0" exp times in the end of value
+            int len=strlen(value);
+            if(len==1 && value[0]=='0'){
               // DO NOTHING: because 0 multiply 10^config.exp == 0 
-	    }else{
-	      if(len+config->exp<=IEEE1888_BACNETIP_VALUE_LEN){
-	        int k;
-	        for(k=0;k<config->exp;k++){
-	          value[len+k]='0';
-	        }
-	      }else{
+            }else{
+              if(len+config->exp<=IEEE1888_BACNETIP_VALUE_LEN){
+                int k;
+                for(k=0;k<config->exp;k++){
+                  value[len+k]='0';
+                }
+              }else{
                 return IEEE1888_BACNETIP_ERROR; // exceeds the maximum length of the value
-	      }
-	    }
-	  }else{
+              }
+            }
+          }else{
             // DO NOTHING (nothing to do)
-	  }
+          }
         }
-	//printf("multiplied=%s\n",value); fflush(stdout);
+        //printf("multiplied=%s\n",value); fflush(stdout);
 
         time_t record_time=time(NULL);
         // copy value to the area of caller
-	strncpy(values[i],value,IEEE1888_BACNETIP_VALUE_LEN);
+        strncpy(values[i],value,IEEE1888_BACNETIP_VALUE_LEN);
         times[i]=record_time;
 
         // load into the status buffer
@@ -325,10 +325,10 @@ int bacnetipGW_bacnetRead(char ids[][IEEE1888_BACNETIP_POINTID_LEN], time_t time
         char logbuf[1000];
         sprintf(logbuf,"Failed to get data of %s from BACnet\n",config->point_id);
         bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
-        
-	values[i][0]='\0';
+
+        values[i][0]='\0';
         times[i]=0;
-        
+
         config->status_time=0;
         config->status_value[0]='\0';
 

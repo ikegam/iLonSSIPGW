@@ -28,13 +28,13 @@
 
 
 struct bacnet_data {
-int type;
-int value_boolean;
-int value_signed;
-unsigned int value_unsigned;
-float value_real;
-int value_enum;
-char value_str[1024];
+  int type;
+  int value_boolean;
+  int value_signed;
+  unsigned int value_unsigned;
+  float value_real;
+  int value_enum;
+  char value_str[1024];
 };
 
 
@@ -46,7 +46,7 @@ char value_str[1024];
 // #define BACNET_INVOKE_ERROR             0x00100
 
 int readProperty(char* host, unsigned short port, 
-                 unsigned long object_id, unsigned char property_id,
+                 unsigned char* name, unsigned char* type,
 		 struct bacnet_data* pdata);
 
 int writeProperty(char* host, unsigned short port,
