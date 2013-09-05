@@ -1,4 +1,5 @@
 #include <CUnit/CUnit.h>
+#include <CUnit/Basic.h>
 
 #include "sparsexml.h"
 
@@ -31,7 +32,7 @@ void test_parse_simple_xml(void) {
 
   sxml_init_parser(&parser);
   sxml_register_func(&parser, &on_tag, NULL, NULL, NULL);
-  ret = sxml_run_parser(&parser, xml);
+  ret = sxml_run_parser(&parser, xml, strlen(xml));
   CU_ASSERT (ret == SXMLParserInterrupted);
 }
 
@@ -58,14 +59,14 @@ void test_parse_separated_xml(void) {
 
   sxml_init_parser(&parser);
   sxml_register_func(&parser, &on_tag, NULL, NULL, NULL);
-  ret = sxml_run_parser(&parser, xml1);
-  CU_ASSERT (parser.state == IN_ATTRIBUTE_KEY);
-  ret = sxml_run_parser(&parser, xml2);
-  CU_ASSERT (parser.state == IN_TAG);
-  ret = sxml_run_parser(&parser, xml3);
+  ret = sxml_run_parser(&parser, xml1, strlen(xml1));
+  CU_ASSERT (parser.state == IN_HEADER);
+  ret = sxml_run_parser(&parser, xml2, strlen(xml2));
+  CU_ASSERT (parser.state == IN_HEADER);
+  ret = sxml_run_parser(&parser, xml3, strlen(xml3));
   CU_ASSERT (parser.state == IN_TAG);
   CU_ASSERT (strcmp(parser.buffer, "ta") == 0);
-  ret = sxml_run_parser(&parser, xml4);
+  ret = sxml_run_parser(&parser, xml4, strlen(xml4));
   CU_ASSERT (parser.state == IN_CONTENT);
   CU_ASSERT (ret == SXMLParserInterrupted);
 }
@@ -80,7 +81,7 @@ void test_check_event_on_content(void) {
     switch (content[0]) {
       case '1':
         if (content[2] == '0') {
-          c++;
+          CU_ASSERT (c++ == 0);
         }
         break;
       case '2':
@@ -90,7 +91,7 @@ void test_check_event_on_content(void) {
         c++;
         break;
     }
-    if (c==2) {
+    if (c==3) {
       return SXMLParserStop;
     }
     return SXMLParserContinue;
@@ -98,7 +99,7 @@ void test_check_event_on_content(void) {
 
   sxml_init_parser(&parser);
   sxml_register_func(&parser, NULL, &on_content, NULL, NULL);
-  ret = sxml_run_parser(&parser, xml);
+  ret = sxml_run_parser(&parser, xml, strlen(xml));
   CU_ASSERT (ret == SXMLParserInterrupted);
 }
 
@@ -109,6 +110,8 @@ int main(void) {
   suite = CU_add_suite("SparseXML", NULL, NULL);
   CU_add_test(suite, "initialize phase", test_initialize_parser);
   CU_add_test(suite, "Parse simple XML", test_parse_simple_xml);
+  CU_add_test(suite, "Parse simple separated XML", test_parse_separated_xml);
+  CU_add_test(suite, "Parse simple separated XML", test_parse_separated_xml);
   CU_add_test(suite, "Parse simple separated XML", test_parse_separated_xml);
   CU_add_test(suite, "Check status in running parser", test_check_event_on_content);
   CU_basic_run_tests();

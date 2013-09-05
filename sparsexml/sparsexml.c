@@ -1,13 +1,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include "sparsexml.h"
 
 unsigned char priv_sxml_change_parser_state(SXMLParser* parser, enum SXMLParserState state) {
-  static unsigned int index = 0;
-  unsigned char ret;
-  int i;
+  unsigned char ret = SXMLParserContinue;
 
   if (strlen(parser->buffer) > 0) {
     if (parser->state == IN_TAG && state == IN_CONTENT && parser->tag_func != NULL) {
@@ -31,15 +30,13 @@ unsigned char priv_sxml_change_parser_state(SXMLParser* parser, enum SXMLParserS
   parser->state = state;
 
   return ret;
-
 }
 
 void sxml_init_parser(SXMLParser* parser) {
-  int i;
-
   parser->state = INITIAL;
   parser->bp = 0;
   parser->buffer[0] = '\0';
+  parser->header_parsed = 0;
 }
 
 void sxml_register_func(SXMLParser* parser, void* open, void* content, void* attribute_key, void* attribute_value) {
@@ -49,56 +46,67 @@ void sxml_register_func(SXMLParser* parser, void* open, void* content, void* att
   parser->attribute_key_func = attribute_key;
 }
 
-unsigned char sxml_run_parser(SXMLParser* parser, char * xml) {
+unsigned char sxml_run_parser(SXMLParser* parser, char *xml, int len) {
 
-  unsigned char ret = SXMLParserContinue;
+  unsigned char result = SXMLParserContinue;
 
   do {
 
-#ifdef __DEBUG1
-    printf("State:%d Buffer:%s Char:%c\r\n", parser->state, parser->buffer, *xml);
+#ifdef  __DEBUG1
+    printf("State:%d Buffer:%s CharAddr: %p Char:%c, result %d, length %d\r\n", parser->state, parser->buffer, xml, *xml, result, len);
 #endif
 
     switch (parser->state) {
       case INITIAL:
         switch (*xml) {
           case '<':
-            ret = priv_sxml_change_parser_state(parser, IN_TAG);
+            result = priv_sxml_change_parser_state(parser, INITIAL);
+            continue;
+          case '?':
+            result = priv_sxml_change_parser_state(parser, IN_HEADER);
+            continue;
+        }
+        break;
+      case IN_HEADER:
+        switch (*xml) {
+          case '>':
+            result = priv_sxml_change_parser_state(parser, IN_CONTENT);
             continue;
         }
         break;
       case IN_TAG:
         switch (*xml) {
           case '>':
-            ret =  priv_sxml_change_parser_state(parser, IN_CONTENT);
+            result =  priv_sxml_change_parser_state(parser, IN_CONTENT);
             continue;
           case ' ':
-            ret = priv_sxml_change_parser_state(parser, IN_ATTRIBUTE_KEY);
+            result = priv_sxml_change_parser_state(parser, IN_ATTRIBUTE_KEY);
             continue;
         }
         break;
       case IN_ATTRIBUTE_KEY:
         switch (*xml) {
           case '>':
-            ret = priv_sxml_change_parser_state(parser, IN_CONTENT);
+            result = priv_sxml_change_parser_state(parser, IN_CONTENT);
             continue;
           case '"':
+            assert(parser->bp > 1);
             parser->bp--;
             parser->buffer[parser->bp] = '\0';
-            ret = priv_sxml_change_parser_state(parser, IN_ATTRIBUTE_VALUE);
+            result = priv_sxml_change_parser_state(parser, IN_ATTRIBUTE_VALUE);
             continue;
         }
       case IN_ATTRIBUTE_VALUE:
         switch (*xml) {
           case '"':
-            ret = priv_sxml_change_parser_state(parser, IN_TAG);
+            result = priv_sxml_change_parser_state(parser, IN_TAG);
             continue;
         }
         break;
       case IN_CONTENT:
         switch (*xml) {
           case '<':
-            ret = priv_sxml_change_parser_state(parser, IN_TAG);
+            result = priv_sxml_change_parser_state(parser, IN_TAG);
             continue;
         }
         break;
@@ -106,10 +114,9 @@ unsigned char sxml_run_parser(SXMLParser* parser, char * xml) {
     parser->buffer[parser->bp++] = *xml;
     parser->buffer[parser->bp] = '\0';
 
+  } while ((*++xml != '\0') && (result == SXMLParserContinue));
 
-  } while (*(++xml) != '\0' && ret == SXMLParserContinue);
-
-  if (ret == SXMLParserStop) {
+  if (result == SXMLParserStop) {
     return SXMLParserInterrupted;
   }
 

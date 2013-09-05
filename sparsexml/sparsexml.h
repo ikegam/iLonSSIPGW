@@ -3,6 +3,7 @@
 
 enum SXMLParserState {
   INITIAL,
+  IN_HEADER,
   IN_TAG,
   IN_ATTRIBUTE_KEY,
   IN_ATTRIBUTE_VALUE,
@@ -20,8 +21,9 @@ enum SXMLParserState {
 typedef struct __SXMLParser {
   enum SXMLParserState state;
 
-  unsigned char buffer[SXMLElementLength];
+  char buffer[SXMLElementLength];
   unsigned int bp;
+  unsigned char header_parsed;
 
   unsigned char (*tag_func)(char *);
   unsigned char (*content_func)(char *);
@@ -32,6 +34,6 @@ typedef struct __SXMLParser {
 unsigned char priv_sxml_change_parser_state(SXMLParser* parser, enum SXMLParserState state);
 void sxml_init_parser(SXMLParser* parser);
 void sxml_register_func(SXMLParser* parser, void* tag, void* content, void* attribute_key, void* attribute_value);
-unsigned char sxml_run_parser(SXMLParser* parser, char * xml);
+unsigned char sxml_run_parser(SXMLParser* parser, char * xml, int count);
 
 #endif
