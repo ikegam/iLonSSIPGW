@@ -46,7 +46,7 @@ void sxml_register_func(SXMLParser* parser, void* open, void* content, void* att
   parser->attribute_key_func = attribute_key;
 }
 
-unsigned char sxml_run_parser(SXMLParser* parser, char *xml, int len) {
+unsigned char sxml_run_parser(SXMLParser* parser, char *xml) {
 
   unsigned char result = SXMLParserContinue;
 

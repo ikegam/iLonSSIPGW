@@ -34,6 +34,6 @@ typedef struct __SXMLParser {
 unsigned char priv_sxml_change_parser_state(SXMLParser* parser, enum SXMLParserState state);
 void sxml_init_parser(SXMLParser* parser);
 void sxml_register_func(SXMLParser* parser, void* tag, void* content, void* attribute_key, void* attribute_value);
-unsigned char sxml_run_parser(SXMLParser* parser, char * xml, int count);
+unsigned char sxml_run_parser(SXMLParser* parser, char * xml);
 
 #endif
