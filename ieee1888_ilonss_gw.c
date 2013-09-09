@@ -15,7 +15,7 @@
 #include <fcntl.h>
 #include <termios.h>
 
-#include "bacnetip.h"
+#include "ilonss.h"
 #include "ieee1888.h"
 #include "ieee1888_datapool.h"
 
@@ -46,9 +46,9 @@ struct bacnetipGW_baseConfig {
   char point_id[IEEE1888_BACNETIP_POINTID_LEN];
   char host[IEEE1888_BACNETIP_HOSTNAME_LEN];
   unsigned short port;
-  unsigned long object_id;
-  unsigned char property_id;
-  uint8_t data_type;
+  char object_id[1024];
+  char property_id[1024];
+  char data_type[1024];
   uint8_t permission;
   int8_t exp;
   time_t status_time;
@@ -163,154 +163,13 @@ int bacnetipGW_bacnetRead(char ids[][IEEE1888_BACNETIP_POINTID_LEN], time_t time
       }
 
       // raw read: invoke readProperty
-      struct bacnet_data bdata;
-      bdata.type=BACNET_DATATYPE_NULL;
-      if(BACNET_OK == readProperty(config->host,config->port,
-            config->object_id,config->property_id,
+      struct ilon_data bdata;
+      if(ILONSS_OK == readProperty(config->host,config->port,
+            config->object_id,config->data_type ,
             &bdata) ){
 
         char value[IEEE1888_BACNETIP_VALUE_LEN];
         memset(value,0,sizeof(value));
-
-        // Translation into string
-        switch(bdata.type){
-          case BACNET_DATATYPE_NULL:
-            value[0]=0;
-            break;
-
-          case BACNET_DATATYPE_BOOLEAN:
-            if(bdata.value_boolean){
-              sprintf(value,"1");
-            }else{
-              sprintf(value,"0");
-            }
-            break;
-
-          case BACNET_DATATYPE_UNSIGNED_INT: 
-            sprintf(value,"%u",bdata.value_unsigned);
-            break;
-
-          case BACNET_DATATYPE_SIGNED_INT:
-            sprintf(value,"%d",bdata.value_signed);
-            break;
-
-          case BACNET_DATATYPE_REAL:
-            {
-              int e;
-              float value_real=bdata.value_real;
-              for(e=0;e<config->exp;e++){ value_real*=10.0; }
-              for(e=0;e<-config->exp;e++){ value_real/=10.0; }
-              sprintf(value,"%f",value_real);
-            }
-            break;
-
-          case BACNET_DATATYPE_CHARACTER_STRING:
-            sprintf(value,"%s",bdata.value_str);
-            break;
-
-          case BACNET_DATATYPE_ENUMERATED:
-            sprintf(value,"%d",bdata.value_enum);
-            break;
-
-          default:
-            sprintf(value,"err (unsupported:%d)",bdata.type);
-            {
-              char logbuf[1000];
-              sprintf(logbuf,"Unsupported datatype=%d\n",bdata.type);
-              bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_WARN);
-            }
-        }
-
-        // debug code
-        //printf("raw=%s\n",value); fflush(stdout);
-
-
-        if( bdata.type==BACNET_DATATYPE_UNSIGNED_INT
-            || bdata.type==BACNET_DATATYPE_SIGNED_INT){
-          // multiply (10^exp)
-          if(config->exp<0){ // insert "." at the end (-exp) of value (add 0 in front of value in some cases)
-
-            if(value[0]!='-'){
-              // if the value is non negative
-              int len=strlen(value);
-              int dot_index=len+config->exp;
-              if(dot_index>0){
-                if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
-                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-                }
-                int k;
-                for(k=len;k>dot_index;k--){
-                  value[k]=value[k-1];
-                }
-                value[dot_index]='.';
-              }else{
-                int k;
-                int shift=1-dot_index;
-                if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
-                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-                }
-                for(k=len-1;k>=0;k--){
-                  value[k+shift]=value[k];
-                }
-                for(k=0;k<shift;k++){
-                  value[k]='0';
-                }
-                for(k=len+shift;k>1;k--){
-                  value[k]=value[k-1];
-                }
-                value[1]='.';
-              }
-            }else{
-              // if the value is negative
-              int len=strlen(value);
-              int dot_index=len+config->exp;
-              if(dot_index>1){
-                if(len+1>=IEEE1888_BACNETIP_VALUE_LEN){
-                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-                }
-                int k;
-                for(k=len;k>dot_index;k--){
-                  value[k]=value[k-1];
-                }
-                value[dot_index]='.';
-              }else{
-                int k;
-                int shift=2-dot_index;
-                if(len+shift+1>=IEEE1888_BACNETIP_VALUE_LEN){
-                  return IEEE1888_BACNETIP_ERROR;    // exceeds the maximum length of the value
-                }
-                for(k=len-1;k>=1;k--){
-                  value[k+shift]=value[k];
-                }
-                for(k=1;k<shift+1;k++){
-                  value[k]='0';
-                }
-                for(k=len+shift+1;k>2;k--){
-                  value[k]=value[k-1];
-                }
-                value[2]='.';
-              }
-            }
-
-          }else if(config->exp>0){  // add "0" exp times in the end of value
-            int len=strlen(value);
-            if(len==1 && value[0]=='0'){
-              // DO NOTHING: because 0 multiply 10^config.exp == 0 
-            }else{
-              if(len+config->exp<=IEEE1888_BACNETIP_VALUE_LEN){
-                int k;
-                for(k=0;k<config->exp;k++){
-                  value[len+k]='0';
-                }
-              }else{
-                return IEEE1888_BACNETIP_ERROR; // exceeds the maximum length of the value
-              }
-            }
-          }else{
-            // DO NOTHING (nothing to do)
-          }
-        }
-        //printf("multiplied=%s\n",value); fflush(stdout);
 
         time_t record_time=time(NULL);
         // copy value to the area of caller
@@ -349,7 +208,7 @@ int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char value
   struct bacnetipGW_baseConfig *config;
   
   // pre-processing -- prepare binary objects to write (if error found, abort the mission.)
-  struct bacnet_data bdata[n_point]; 
+  struct ilon_data bdata[n_point]; 
  
   for(i=0;i<n_point;i++){
     if(bacnetipGW_findConfig(ids[i],&config)==IEEE1888_BACNETIP_OK){
@@ -357,7 +216,7 @@ int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char value
       // parse the value and generate binary format according to the config.type and config.exp
       uint8_t data[4];
       int64_t value_64=0;
-      struct bacnet_data* pdata;
+      struct ilon_data* pdata;
       char value_str[IEEE1888_BACNETIP_VALUE_LEN];
       memset(value_str,0,sizeof(value_str));
       strcpy(value_str,values[i]);
@@ -421,50 +280,6 @@ int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char value
       }
 
       // encode into the data
-      switch(config->data_type){
-      case BACNET_DATATYPE_BOOLEAN:
-        if(strcmp(value_str,"1")==0){
-          pdata->type=BACNET_DATATYPE_BOOLEAN;
-          pdata->value_boolean=1;
-        }else if(strcmp(value_str,"0")==0){
-          pdata->type=BACNET_DATATYPE_BOOLEAN;
-          pdata->value_boolean=0;
-        }else{
-          char logbuf[1000];
-          sprintf(logbuf,"boolean type schema error boolean=%s \n",value_str);
-          bacnetipGW_log(logbuf,IEEE1888_BACNETIP_LOGLEVEL_ERROR);
-        }
-        break;
-   
-      case BACNET_DATATYPE_UNSIGNED_INT:
-        pdata->type=BACNET_DATATYPE_UNSIGNED_INT;
-	pdata->value_unsigned=(unsigned int)value_64;
-        break;
-      case BACNET_DATATYPE_SIGNED_INT:
-        pdata->type=BACNET_DATATYPE_SIGNED_INT;
-	pdata->value_signed=(int)value_64;
-        break;
-      case BACNET_DATATYPE_REAL:
-        pdata->type=BACNET_DATATYPE_REAL;
-        {
-          int e;
-          float value_real=atof(value_str);
-          for(e=0;e<config->exp;e++){ value_real/=10.0; }
-          for(e=0;e<-config->exp;e++){ value_real*=10.0; }
-	  pdata->value_real=value_real;
-        }
-        break;
-      case BACNET_DATATYPE_CHARACTER_STRING:
-        pdata->type=BACNET_DATATYPE_CHARACTER_STRING;
-	strcpy(pdata->value_str,value_str);
-        break;
-      case BACNET_DATATYPE_ENUMERATED:
-        pdata->type=BACNET_DATATYPE_ENUMERATED;
-	pdata->value_enum=(int)value_64;
-        break;
-      default:
-        return IEEE1888_BACNETIP_ERROR; // unsupported data type is configured.
-      }
     }
   }
   
@@ -492,9 +307,10 @@ int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char value
       if(k<n_black_host){
         continue;
       }
+      strcpy(bdata[i].type, config->property_id);
 
-      if(BACNET_OK == writeProperty(config->host,config->port,
-                  	   config->object_id,config->property_id,
+      if(ILONSS_OK == writeProperty(config->host,config->port,
+                  	   config->object_id,
                            &bdata[i]) ){
         // SUCCESS
       }else{
@@ -1269,30 +1085,19 @@ int bacnetipGW_readConfig(const char* configPath){
           fclose(fp); return IEEE1888_BACNETIP_ERROR;
         }
         conf.port=(uint16_t)strtol(columns[3],NULL,0);
-        conf.object_id=(uint32_t)strtol(columns[4],NULL,0);
+        strcpy(conf.object_id, columns[4]);
         
         if(strtol(columns[5],NULL,0)<1 || strtol(columns[5],NULL,0)>=256){
           bacnetipGW_log("Invalid property id is specified in BIF\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_BACNETIP_ERROR;
         }
-        conf.property_id=(uint8_t)strtol(columns[5],NULL,0);
+        strcpy(conf.property_id, columns[5]);
 	
-        if(strcmp("BOOLEAN",columns[6])==0){
-          conf.data_type=1; // BACNET_DATATYPE_BOOLEAN;
-        }else if(strcmp("UNSIGNED",columns[6])==0){
-          conf.data_type=BACNET_DATATYPE_UNSIGNED_INT;
-        }else if(strcmp("SIGNED",columns[6])==0){
-          conf.data_type=BACNET_DATATYPE_SIGNED_INT;
-        }else if(strcmp("REAL",columns[6])==0){
-          conf.data_type=BACNET_DATATYPE_REAL;
-        }else if(strcmp("STRING",columns[6])==0){
-          conf.data_type=BACNET_DATATYPE_CHARACTER_STRING;
-        }else if(strcmp("ENUM",columns[6])==0){
-          conf.data_type=BACNET_DATATYPE_ENUMERATED;
-        }else if(strcmp("",columns[6])==0){
+        if(strcmp("",columns[6])==0){
           bacnetipGW_log("Unknown data_type is specifed in BIF (only BOOLEAN, UNSIGNED, SIGNED, REAL, STRING, ENUM are allowed)\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_BACNETIP_ERROR;
         }
+        strcpy(conf.data_type, columns[6]);
 
         if(strcmp("R",columns[7])==0){
           conf.permission=IEEE1888_BACNETIP_ACCESS_READ;
@@ -1471,15 +1276,6 @@ void bacnetipGW_printStatus(FILE* fp){
     }else{
       strcpy(style,"oddrow");
     }
-    switch(p->data_type){
-    case BACNET_DATATYPE_BOOLEAN: strcpy(sdatatype,"BOOLEAN"); break;
-    case BACNET_DATATYPE_UNSIGNED_INT: strcpy(sdatatype,"UNSIGNED"); break;
-    case BACNET_DATATYPE_SIGNED_INT:   strcpy(sdatatype,"SIGNED"); break;
-    case BACNET_DATATYPE_REAL: 	       strcpy(sdatatype,"REAL"); break;
-    case BACNET_DATATYPE_CHARACTER_STRING:  strcpy(sdatatype,"STRING"); break;
-    case BACNET_DATATYPE_ENUMERATED:        strcpy(sdatatype,"ENUM");   break;
-    default: strcpy(sdatatype,"ERROR");
-    }
     switch(p->permission){
     case IEEE1888_BACNETIP_ACCESS_READ: strcpy(spermission,"R"); break;
     case IEEE1888_BACNETIP_ACCESS_WRITE: strcpy(spermission,"W"); break;
@@ -1499,8 +1295,8 @@ void bacnetipGW_printStatus(FILE* fp){
     fprintf(fp,"<td>%s</td>\n",p->point_id);
     fprintf(fp,"<td>%s</td>\n",p->host);
     fprintf(fp,"<td>%05d</td>\n",p->port);
-    fprintf(fp,"<td>0x%08lx</td>\n",p->object_id);
-    fprintf(fp,"<td>0x%02x</td>\n",p->property_id);
+    fprintf(fp,"<td>%s</td>\n",p->object_id);
+    fprintf(fp,"<td>%s</td>\n",p->property_id);
     fprintf(fp,"<td>%s</td>\n",sdatatype);
     fprintf(fp,"<td>%s</td>\n",spermission);
     fprintf(fp,"<td>10^%d</td>\n",p->exp);
@@ -1542,15 +1338,6 @@ void bacnetipGW_printConfig(FILE* fp){
     struct bacnetipGW_baseConfig* p=&m_config[i];
     char sdatatype[10];
     char spermission[10];
-    switch(p->data_type){
-    case 1/* BACNET_DATATYPE_BOOLEAN*/: strcpy(sdatatype,"BOOLEAN"); break;
-    case BACNET_DATATYPE_UNSIGNED_INT: strcpy(sdatatype,"UNSIGNED"); break;
-    case BACNET_DATATYPE_SIGNED_INT:   strcpy(sdatatype,"SIGNED"); break;
-    case BACNET_DATATYPE_REAL: 	       strcpy(sdatatype,"REAL"); break;
-    case BACNET_DATATYPE_CHARACTER_STRING:  strcpy(sdatatype,"STRING"); break;
-    case BACNET_DATATYPE_ENUMERATED:        strcpy(sdatatype,"ENUM");   break;
-    default: strcpy(sdatatype,"ERROR");
-    }
     switch(p->permission){
     case IEEE1888_BACNETIP_ACCESS_READ: strcpy(spermission,"R"); break;
     case IEEE1888_BACNETIP_ACCESS_WRITE: strcpy(spermission,"W"); break;
@@ -1559,7 +1346,7 @@ void bacnetipGW_printConfig(FILE* fp){
     default: strcpy(spermission,"ERROR");
     }
 
-    fprintf(fp,"BIF,%s,%s,%d,0x%08lx,0x%02x,%s,%s,%d\n",p->point_id,p->host,p->port,p->object_id,p->property_id,sdatatype,spermission,p->exp);
+    fprintf(fp,"BIF,%s,%s,%d,%s,%s,%s,%s,%d\n",p->point_id,p->host,p->port,p->object_id,p->property_id,sdatatype,spermission,p->exp);
   }
   
   for(i=0;i<n_m_writeServer_ids;i++){
