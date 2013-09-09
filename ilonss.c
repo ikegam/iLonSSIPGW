@@ -154,11 +154,21 @@ int readProperty(char* host, unsigned short port,
   unsigned char rs_packet[ILONSS_PACKET_MAX_LEN];
 
   char key[1024], value[1024], content[1024];
+  int priority = -1;
 
   unsigned char tagParse(char *tagname) {
+    static unsigned char gotvalue = 0;
+    if (strcmp(tagname, "/UCPTpriority") == 0) {
+      priority = atoi(content);
+    }
     if (strcmp(tagname, "/UCPTvalue") == 0 &&
         strcmp(type, value) == 0 &&
         strcmp(key, "LonFormat") == 0) {
+      strcpy(pdata->value, content);
+      strcpy(pdata->type, value);
+      gotvalue = 1;
+    }
+    if (gotvalue == 1 && priority > 0) {
       return SXMLParserStop;
     }
     return SXMLParserContinue;
@@ -206,9 +216,7 @@ int readProperty(char* host, unsigned short port,
   unsigned char ret = sxml_run_parser(&parser, rs_packet);
 
   if (ret == SXMLParserInterrupted) {
-    strcpy(pdata->value, content);
-    strcpy(pdata->type, value);
-    printf("Complete: %s, %s, %s\n", key, value, content);
+    pdata->priority = priority;
   } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);
@@ -254,8 +262,11 @@ int writeProperty(char* host, unsigned short port,
 
   char key[1024], value[1024], content[1024];
 
-  unsigned char tagParse(char *tagname) {
-    //  return SXMLParserStop;
+  unsigned char tagParse(char *name) {
+    if (strcmp(name, "/UCPTfaultCount") == 0 &&
+        strcmp("0", content) == 0) {
+      return SXMLParserStop;
+    }
     return SXMLParserContinue;
   }
 
@@ -298,9 +309,7 @@ int writeProperty(char* host, unsigned short port,
 
   unsigned char ret = sxml_run_parser(&parser, rs_packet);
 
-  if (ret == SXMLParserInterrupted) {
-    printf("Complete: %s, %s, %s\n", key, value, content);
-  } else {
+  if (ret != SXMLParserInterrupted) {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);
     return ILONSS_NG;
@@ -310,24 +319,31 @@ int writeProperty(char* host, unsigned short port,
 }
 
 
+/*
 int main(int argc, char* argv[]){
 
    struct ilon_data data;
 
-   if(readProperty("192.168.0.146", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", "UCPTvalueDef", &data)==ILONSS_OK){
-    // printf("INFO: unknown data type %s %s\n",data.type, data.value_str);
+   if(readProperty("192.168.0.7", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", "UCPTvalueDef", &data)==ILONSS_OK){
+     printf("INFO: data type %s %s %d\n",data.type, data.value, data.priority);
    }else{
      printf("Error");
    }
 
-   strcpy(data.type, "");
-   strcpy(data.value, "");
+   if (strcmp(data.value, "OFF") == 0) {
+     strcpy(data.value, "ON");
+   } else {
+     strcpy(data.value, "OFF");
+   }
 
-   if(writeProperty("192.168.0.146", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
-      printf("success..");
+   strcpy(data.type, "UCPTvalueDef");
+   data.priority=255;
+
+   if(writeProperty("192.168.0.7", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
+      printf("success..\n");
    }else{
-      printf("error..");
+      printf("error..\n");
    }
 
 }
-
+*/
