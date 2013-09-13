@@ -47,8 +47,8 @@ struct bacnetipGW_baseConfig {
   char host[IEEE1888_BACNETIP_HOSTNAME_LEN];
   unsigned short port;
   char object_id[1024];
-  char property_id[1024];
   char data_type[1024];
+  int priority;
   uint8_t permission;
   int8_t exp;
   time_t status_time;
@@ -173,12 +173,12 @@ int bacnetipGW_bacnetRead(char ids[][IEEE1888_BACNETIP_POINTID_LEN], time_t time
 
         time_t record_time=time(NULL);
         // copy value to the area of caller
-        strncpy(values[i],value,IEEE1888_BACNETIP_VALUE_LEN);
+        strncpy(values[i],bdata.value,IEEE1888_BACNETIP_VALUE_LEN);
         times[i]=record_time;
 
         // load into the status buffer
         config->status_time=record_time;
-        strncpy(config->status_value,value,IEEE1888_BACNETIP_VALUE_LEN);
+        strncpy(config->status_value,bdata.value,IEEE1888_BACNETIP_VALUE_LEN);
 
       }else{
         char logbuf[1000];
@@ -212,16 +212,11 @@ int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char value
  
   for(i=0;i<n_point;i++){
     if(bacnetipGW_findConfig(ids[i],&config)==IEEE1888_BACNETIP_OK){
-      
+
       // parse the value and generate binary format according to the config.type and config.exp
-      uint8_t data[4];
-      int64_t value_64=0;
-      struct ilon_data* pdata;
       char value_str[IEEE1888_BACNETIP_VALUE_LEN];
       memset(value_str,0,sizeof(value_str));
       strcpy(value_str,values[i]);
-
-      pdata=&bdata[i];
 
       // load into the status buffer
       config->status_time=time(NULL);
@@ -229,57 +224,52 @@ int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char value
 
       if(config->exp<0){
         int len=strlen(value_str);
-	char* pdot=strstr(value_str,".");
-	if(pdot==NULL){
-	  // if no dot(.)
-	  int k;
-	  for(k=0;k<-config->exp;k++){
-	    value_str[len+k]='0';
-	  }
-	}else{
-	  // if dot(.) found
+        char* pdot=strstr(value_str,".");
+        if(pdot==NULL){
+          // if no dot(.)
           int k;
-	  char* pend=pdot-config->exp;
-	  int end_len=pend-value_str+1;
-	  for(k=len;k<end_len;k++){  // fill by '0' if not presented
-	    value_str[k]='0';
-	  }
-	  for(k=0;k<-config->exp;k++){  // shift (for removing dot(.))
+          for(k=0;k<-config->exp;k++){
+            value_str[len+k]='0';
+          }
+        }else{
+          // if dot(.) found
+          int k;
+          char* pend=pdot-config->exp;
+          int end_len=pend-value_str+1;
+          for(k=len;k<end_len;k++){  // fill by '0' if not presented
+            value_str[k]='0';
+          }
+          for(k=0;k<-config->exp;k++){  // shift (for removing dot(.))
             *(pdot+k)=*(pdot+k+1);
-	  }
-	  *pend='\0';                  // finish (by pending null character)
-	}
-	value_64=atoll(value_str);
+          }
+          *pend='\0';                  // finish (by pending null character)
+        }
 
       }else if(config->exp>0){
         int len=strlen(value_str);
         char* pdot=strstr(value_str,".");
-	if(pdot!=NULL){
-	  len=pdot-value_str;
-	}
+        if(pdot!=NULL){
+          len=pdot-value_str;
+        }
 
-	if(value_str[0]!='-'){ // if non-negative
-	  if(config->exp>=len){
-	    value_str[0]='0';
-	    value_str[1]='\0';
-	  }else{
+        if(value_str[0]!='-'){ // if non-negative
+          if(config->exp>=len){
+            value_str[0]='0';
+            value_str[1]='\0';
+          }else{
             value_str[len-config->exp]='\0';
-	  }
-	}else{ // if negative
-	  if(config->exp+1>=len){
-	    value_str[0]='0';
-	    value_str[1]='\0';
-	  }else{
+          }
+        }else{ // if negative
+          if(config->exp+1>=len){
+            value_str[0]='0';
+            value_str[1]='\0';
+          }else{
             value_str[len-config->exp]='\0';
-	  }
-	}
-	value_64=atoll(value_str);
-	
+          }
+        }
+
       }else{
-        value_64=atoll(value_str);
       }
-
-      // encode into the data
     }
   }
   
@@ -307,7 +297,8 @@ int bacnetipGW_bacnetWrite(char ids[][IEEE1888_BACNETIP_POINTID_LEN], char value
       if(k<n_black_host){
         continue;
       }
-      strcpy(bdata[i].type, config->property_id);
+      strcpy(bdata[i].type, config->data_type);
+      bdata[i].priority = config->priority;
 
       if(ILONSS_OK == writeProperty(config->host,config->port,
                   	   config->object_id,
@@ -858,6 +849,7 @@ void* bacnetipGW_writeClient_thread(void* args){
       rq_body->n_point=n_point;
 
       ieee1888_transport* rs_transport=ieee1888_client_data(rq_transport,m_writeClient_ieee1888_server_url,NULL,NULL);
+      ieee1888_dump_objects((ieee1888_object*)rq_transport);
       if(rs_transport!=NULL && rs_transport->header!=NULL && rs_transport->header->OK!=NULL){
         bacnetipGW_log("writeClient success\n",IEEE1888_BACNETIP_LOGLEVEL_INFO);
       }else{
@@ -1014,14 +1006,14 @@ int bacnetipGW_readConfig(const char* configPath){
     return IEEE1888_BACNETIP_ERROR;
   }
 
-  // read a line
+  // `ead a line
   char line[2048];
   while(fgets(line,2048,fp)!=NULL){
     
     // eats spaces, tabs, etc..
     int len=strlen(line);
     for(i=0,k=0;i<len;i++){
-      if(line[i]<=(char)0x20){
+      if(line[i]<=(char)0x1f){
         continue;
       }
       if(k<i){
@@ -1085,19 +1077,21 @@ int bacnetipGW_readConfig(const char* configPath){
           fclose(fp); return IEEE1888_BACNETIP_ERROR;
         }
         conf.port=(uint16_t)strtol(columns[3],NULL,0);
+
         strcpy(conf.object_id, columns[4]);
-        
-        if(strtol(columns[5],NULL,0)<1 || strtol(columns[5],NULL,0)>=256){
+
+        if(strlen(columns[5]) >= 1024){
           bacnetipGW_log("Invalid property id is specified in BIF\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_BACNETIP_ERROR;
         }
-        strcpy(conf.property_id, columns[5]);
 	
-        if(strcmp("",columns[6])==0){
-          bacnetipGW_log("Unknown data_type is specifed in BIF (only BOOLEAN, UNSIGNED, SIGNED, REAL, STRING, ENUM are allowed)\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
+        strcpy(conf.data_type, columns[5]);
+
+        if(strtol(columns[6],NULL,0)<1 || strtol(columns[6],NULL,0)>=65536){
+          bacnetipGW_log("Invalid priority is specified in BIF\n",IEEE1888_BACNETIP_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_BACNETIP_ERROR;
         }
-        strcpy(conf.data_type, columns[6]);
+        conf.priority = (int)strtol(columns[3],NULL,0);
 
         if(strcmp("R",columns[7])==0){
           conf.permission=IEEE1888_BACNETIP_ACCESS_READ;
@@ -1296,7 +1290,6 @@ void bacnetipGW_printStatus(FILE* fp){
     fprintf(fp,"<td>%s</td>\n",p->host);
     fprintf(fp,"<td>%05d</td>\n",p->port);
     fprintf(fp,"<td>%s</td>\n",p->object_id);
-    fprintf(fp,"<td>%s</td>\n",p->property_id);
     fprintf(fp,"<td>%s</td>\n",sdatatype);
     fprintf(fp,"<td>%s</td>\n",spermission);
     fprintf(fp,"<td>10^%d</td>\n",p->exp);
@@ -1314,7 +1307,6 @@ void bacnetipGW_printStatus(FILE* fp){
 }
 
 void* bacnetipGW_printStatus_thread(void* args){
-  
   while(strlen(m_printStatus_filepath)>0){
     FILE* fp=fopen(m_printStatus_filepath,"w");
     if(fp){
@@ -1323,6 +1315,7 @@ void* bacnetipGW_printStatus_thread(void* args){
     }
     sleep(30);
   }
+  return NULL;
 }
 
 
@@ -1346,7 +1339,7 @@ void bacnetipGW_printConfig(FILE* fp){
     default: strcpy(spermission,"ERROR");
     }
 
-    fprintf(fp,"BIF,%s,%s,%d,%s,%s,%s,%s,%d\n",p->point_id,p->host,p->port,p->object_id,p->property_id,sdatatype,spermission,p->exp);
+    fprintf(fp,"BIF,%s,%s,%d,%s,%s,%s,%d\n",p->point_id,p->host,p->port,p->object_id,sdatatype,spermission,p->exp);
   }
   
   for(i=0;i<n_m_writeServer_ids;i++){

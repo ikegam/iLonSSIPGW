@@ -63,7 +63,7 @@ int ieee1888_server_print_wsdl(char* buffer, int socket, const char* path){
   char serv[10];
   struct sockaddr_storage sa;
   len=sizeof(sa);
-  if(getsockname(socket, (struct sockaddr*)&sa, &len)==0){
+  if(getsockname(socket, (struct sockaddr*)&sa, (socklen_t *)&len)==0){
      char buf[100];
      getnameinfo((struct sockaddr*)&sa,len,buf,100,serv,10,NI_NOFQDN|NI_NUMERICHOST|NI_NUMERICSERV);
      if(strstr(buf,".")!=NULL){

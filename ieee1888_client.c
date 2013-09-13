@@ -87,9 +87,9 @@ int ieee1888_soap_client(const char* soapEPR, const char* send_msg, char* recv_m
   free(buffer);
 
   // for debug
-  // printf("host: %s\n",host);
-  // printf("port: %d\n",port);
-  // printf("dir:  %s\n",dir);
+  printf("host: %s\n",host);
+  printf("port: %d\n",port);
+  printf("dir:  %s\n",dir);
   /* ---- Step 1 : parse soapEPR (end) ---- */
   
   /* ---- Step 2 : create connection to the server (begin) ---- */
@@ -112,12 +112,12 @@ int ieee1888_soap_client(const char* soapEPR, const char* send_msg, char* recv_m
   sopt.service=str_port;
 
   memset(&hints, 0, sizeof(hints));
-  hints.ai_family=PF_INET;
+  hints.ai_family=PF_UNSPEC;
   hints.ai_socktype=SOCK_STREAM;
 
   err=getaddrinfo(sopt.host, sopt.service, &hints, &res0);
   if(err){
-    fprintf(stderr,"ERROR: getaddrinfo\n"); fflush(stderr);
+    fprintf(stderr,"ERROR: getaddrinfo(%d): %s\n", err, gai_strerror(err)); fflush(stderr);
     // free & return 
     free(host); free(dir);
     return IEEE1888_SOAP_CLIENT_IMPL_ERROR_DNS_RESOLVE;

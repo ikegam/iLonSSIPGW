@@ -23,7 +23,6 @@
 #define ILONSS_PACKET_MAX_LEN 100000
 #define ILONSS_RESP_TIMEOUT 3
 
-static unsigned char invokeID=1;
 
 SXMLParser parser;
 
@@ -36,7 +35,7 @@ int ilonss_invoke(const char* host, unsigned short port,
   int sock;
   struct sockaddr_in s0;
   struct sockaddr_in s1;
-  int recvlen, addrlen;
+  int recvlen;
 
   if((sock=socket(AF_INET,SOCK_STREAM,0))<0){
     fprintf(stderr,"Socket error\n");
@@ -74,7 +73,7 @@ int ilonss_invoke(const char* host, unsigned short port,
 
   do{
     retry=0;
-    strcpy(rs, "");
+    strcpy((char *)rs, "");
     if (connect(sock, (struct sockaddr*)&s1,
           sizeof(struct sockaddr_in)) > 0) {
       close(sock);
@@ -99,7 +98,7 @@ int ilonss_invoke(const char* host, unsigned short port,
     while ((recvlen=recv(sock, receive_buf, 1024, 0)) > 0) {
       *n_rs+=recvlen;
       receive_buf[recvlen] = '\0';
-      strcat(rs, receive_buf);
+      strcat((char *)rs, (char *)receive_buf);
     }
     alarm(0);
     close(sock);
@@ -110,7 +109,7 @@ int ilonss_invoke(const char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  strcpy(rs, strstr(rs, "\r\n\r\n") + 4);
+  strcpy((char *)rs, strstr((char *)rs, "\r\n\r\n") + 4);
 
   return ILONSS_OK;
 }
@@ -127,7 +126,9 @@ void bacnetip_recv_fail(int signum){
 
 
 int readProperty(char* host, unsigned short port,
-    unsigned char* name, unsigned char* type, struct ilon_data* pdata) {
+    char* name, char* type, struct ilon_data* pdata) {
+
+  printf("%s, %d, %s, %s\r\n", host, port, name, type);
 
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
     "POST /WSDL/iLON100.WSDL HTTP/1.1\r\n"
@@ -191,20 +192,22 @@ int readProperty(char* host, unsigned short port,
   sxml_init_parser(&parser);
   sxml_register_func(&parser, &tagParse, &contentParse, &keyParse, &valueParse);
 
-  // invoke ID
-  int thisInvokeID=invokeID++;
-
   // generate the request packet
-  sprintf(rq_packet_body, rq_packet_fmt_body, name);
-  sprintf(rq_packet, rq_packet_fmt, strlen(rq_packet_body), host);
-  strcat(rq_packet, rq_packet_body);
+  sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)name);
+  sprintf((char *)rq_packet, (char *)rq_packet_fmt, strlen((char *)rq_packet_body), (char *)host);
+  strcat((char *)rq_packet, (char *)rq_packet_body);
+
+  printf("requested: %s", rq_packet);
+  printf("\r\n");
 
   // invoke the remote bacnet object
   int n_rs_packet=0;
   if (ilonss_invoke(host,port,rq_packet, 
-        strlen(rq_packet), rs_packet, &n_rs_packet)!=ILONSS_OK) {
+        strlen((char *)rq_packet), rs_packet, &n_rs_packet)!=ILONSS_OK) {
     return ILONSS_NG;
   }
+  printf("\r\n");
+  printf("received: %s", rs_packet);
 
   // parse and verify the response packet
   if (n_rs_packet<1000) {
@@ -213,7 +216,7 @@ int readProperty(char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  unsigned char ret = sxml_run_parser(&parser, rs_packet);
+  unsigned char ret = sxml_run_parser(&parser, (char *)rs_packet);
 
   if (ret == SXMLParserInterrupted) {
     pdata->priority = priority;
@@ -231,8 +234,8 @@ int readProperty(char* host, unsigned short port,
 */
 
 int writeProperty(char* host, unsigned short port,
-                 unsigned char* name,
-		 const struct ilon_data* pdata){
+                 char* name,
+		 struct ilon_data* pdata){
 
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
     "POST /WSDL/iLON100.WSDL HTTP/1.1\r\n"
@@ -287,16 +290,15 @@ int writeProperty(char* host, unsigned short port,
   sxml_init_parser(&parser);
   sxml_register_func(&parser, &tagParse, &contentParse, &keyParse, &valueParse);
 
-  // invoke ID
-  int thisInvokeID=invokeID++;
-
   // generate the request packet
-  sprintf(rq_packet_body, rq_packet_fmt_body, name, pdata->type, pdata->value, pdata->priority);
-  sprintf(rq_packet, rq_packet_fmt, strlen(rq_packet_body), host);
-  strcat(rq_packet, rq_packet_body);
+  sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)name, pdata->type, pdata->value, pdata->priority);
+  sprintf((char *)rq_packet, (char *)rq_packet_fmt, strlen((char *)rq_packet_body), host);
+  strcat((char *)rq_packet, (char *)rq_packet_body);
+
+  printf("%s", rq_packet);
 
   int n_rs_packet=0;
-  if (ilonss_invoke(host,port,rq_packet, strlen(rq_packet),rs_packet,&n_rs_packet)!=ILONSS_OK) {
+  if (ilonss_invoke(host,port,rq_packet, strlen((char *)rq_packet),rs_packet,&n_rs_packet)!=ILONSS_OK) {
     return ILONSS_NG;
   }
 
@@ -307,7 +309,7 @@ int writeProperty(char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  unsigned char ret = sxml_run_parser(&parser, rs_packet);
+  unsigned char ret = sxml_run_parser(&parser, (char *)rs_packet);
 
   if (ret != SXMLParserInterrupted) {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
@@ -318,13 +320,12 @@ int writeProperty(char* host, unsigned short port,
   return ILONSS_OK;
 }
 
-
 /*
 int main(int argc, char* argv[]){
 
    struct ilon_data data;
 
-   if(readProperty("192.168.0.7", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", "UCPTvalueDef", &data)==ILONSS_OK){
+   if(readProperty("192.168.0.146", 80, "Net/LON/iLON App/Digital Output 1/nvoClaValueFb_1", "UCPTvalueDef", &data)==ILONSS_OK){
      printf("INFO: data type %s %s %d\n",data.type, data.value, data.priority);
    }else{
      printf("Error");
@@ -339,7 +340,7 @@ int main(int argc, char* argv[]){
    strcpy(data.type, "UCPTvalueDef");
    data.priority=255;
 
-   if(writeProperty("192.168.0.7", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
+   if(writeProperty("192.168.0.146", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
       printf("success..\n");
    }else{
       printf("error..\n");

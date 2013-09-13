@@ -19,11 +19,11 @@ struct ilon_data {
 #define ILONSS_NG   1
 
 int readProperty(char* host, unsigned short port, 
-                 unsigned char* name, unsigned char* type,
+                 char* name, char* type,
 		 struct ilon_data* pdata);
 
 int writeProperty(char* host, unsigned short port,
-                 unsigned char* name,
-		 const struct ilon_data* pdata);
+                  char* name,
+		 struct ilon_data* pdata);
 
 #endif  // #ifndef ___BACNET_IP_H_20120625___
