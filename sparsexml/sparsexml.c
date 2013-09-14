@@ -1,9 +1,10 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
 
-#include "sparsexml.h"
+#include "sparsexml-priv.h"
 
 unsigned char priv_sxml_change_parser_state(SXMLParser* parser, enum SXMLParserState state) {
   unsigned char ret = SXMLParserContinue;
@@ -32,11 +33,20 @@ unsigned char priv_sxml_change_parser_state(SXMLParser* parser, enum SXMLParserS
   return ret;
 }
 
-void sxml_init_parser(SXMLParser* parser) {
+SXMLParser* sxml_init_parser(void) {
+  SXMLParser* parser;
+  parser = malloc(sizeof(SXMLParser));
+
   parser->state = INITIAL;
   parser->bp = 0;
   parser->buffer[0] = '\0';
   parser->header_parsed = 0;
+
+  return parser;
+}
+
+void sxml_destroy_parser(SXMLParser *parser) {
+  free(parser);
 }
 
 void sxml_register_func(SXMLParser* parser, void* open, void* content, void* attribute_key, void* attribute_value) {
@@ -124,34 +134,3 @@ unsigned char sxml_run_parser(SXMLParser* parser, char *xml) {
 
 }
 
-// <?xml version="1.0" encoding="UTF-8"?><env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ilon="http://wsdl.echelon.com/web_services_ns/ilon100/v4.0/message/" xmlns:env="http://schemas.xmlsoap.org/soap/envelope/"><env:Body><ilon:Read><iLonItem><Item><UCPTname>Net/LON/iLON App/Digital Output 1/nviClaValue_1</UCPTname></Item></iLonItem></ilon:Read></env:Body></env:Envelope>
-
-/*
-unsigned char storage[10][1024];
-unsigned char onName=0x00;
-
-void tag_open(char *tagname) {
-  printf("tag: %s\r\n", tagname);
-}
-
-void tag_content(char *content) {
-  printf("content: %s\r\n", content);
-}
-
-void key(char *name) {
-  printf("attribute key: %s\n", name);
-}
-
-void value(char *name) {
-  printf("attribute value: %s\n", name);
-}
-
-void main (void) {
-  unsigned char xml[] = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><env:Envelope xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:ilon=\"http://wsdl.echelon.com/web_services_ns/ilon100/v4.0/message/\" xmlns:env=\"http://schemas.xmlsoap.org/soap/envelope/\"><env:Body><ilon:Read><iLonItem><Item><UCPTname>Net/LON/iLON App/Digital Output 1/nviClaValue_1</UCPTname></Item></iLonItem></ilon:Read></env:Body></env:Envelope>";
-
-  SXMLParser parser;
-  sxml_init_parser(&parser);
-  sxml_register_func(&parser, &tag_open, &tag_content, &key, &value, (unsigned char*)storage);
-  sxml_run_parser(&parser, xml);
-}
-*/

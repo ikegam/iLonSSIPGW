@@ -24,9 +24,11 @@
 #define ILONSS_RESP_TIMEOUT 3
 
 
-SXMLParser parser;
+SXMLParser* parser;
 
-void ilonss_recv_fail(int signum) {
+void ilonss_recv_fail(int signum){
+  // logging the error;
+  // fprintf(stdout,"ilonss_recv_fail -- response timedout\n");
 }
 
 int ilonss_invoke(const char* host, unsigned short port, 
@@ -114,10 +116,6 @@ int ilonss_invoke(const char* host, unsigned short port,
   return ILONSS_OK;
 }
 
-void bacnetip_recv_fail(int signum){
-  // logging the error;
-  // fprintf(stdout,"bacnetip_recv_fail -- response timedout\n");
-}
 
 
 /*
@@ -189,8 +187,8 @@ int readProperty(char* host, unsigned short port,
     return SXMLParserContinue;
   }
 
-  sxml_init_parser(&parser);
-  sxml_register_func(&parser, &tagParse, &contentParse, &keyParse, &valueParse);
+  parser = sxml_init_parser();
+  sxml_register_func(parser, &tagParse, &contentParse, &keyParse, &valueParse);
 
   // generate the request packet
   sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)name);
@@ -216,7 +214,8 @@ int readProperty(char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  unsigned char ret = sxml_run_parser(&parser, (char *)rs_packet);
+  unsigned char ret = sxml_run_parser(parser, (char *)rs_packet);
+  sxml_destroy_parser(parser);
 
   if (ret == SXMLParserInterrupted) {
     pdata->priority = priority;
@@ -287,8 +286,8 @@ int writeProperty(char* host, unsigned short port,
     return SXMLParserContinue;
   }
 
-  sxml_init_parser(&parser);
-  sxml_register_func(&parser, &tagParse, &contentParse, &keyParse, &valueParse);
+  parser = sxml_init_parser();
+  sxml_register_func(parser, &tagParse, &contentParse, &keyParse, &valueParse);
 
   // generate the request packet
   sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)name, pdata->type, pdata->value, pdata->priority);
@@ -309,7 +308,8 @@ int writeProperty(char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  unsigned char ret = sxml_run_parser(&parser, (char *)rs_packet);
+  unsigned char ret = sxml_run_parser(parser, (char *)rs_packet);
+  sxml_destroy_parser(parser);
 
   if (ret != SXMLParserInterrupted) {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
@@ -321,6 +321,7 @@ int writeProperty(char* host, unsigned short port,
 }
 
 /*
+
 int main(int argc, char* argv[]){
 
    struct ilon_data data;

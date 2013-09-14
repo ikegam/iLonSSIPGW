@@ -1,15 +1,17 @@
+CFLAGS=-Wall -g -O0
+
 all: test-sparsexml
 
 test: test-sparsexml
 	./$<
 
-sparsexml.o: sparsexml.c
-	$(CC) -Wall -g -O0 -c $<
+test-sparsexml: sparsexml.o test.o test-private.o
+	$(CC) $(CFLAGS) -o $@ $^ -lcunit
 
-test-sparsexml: sparsexml.o test.c
-	$(CC) -Wall -g -O0 -o $@ $^ -lcunit
+.c.o:
+	$(CC) $(CFLAGS) -c $<
 
-clean: sparsexml.o test-sparsexml
-	rm $^
+clean: test-sparsexml
+	rm $^ *.o
 
 .PHONY: clean all test
