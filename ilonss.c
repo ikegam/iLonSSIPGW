@@ -127,7 +127,7 @@ int ilonss_invoke(const char* host, unsigned short port,
 
 int readProperty(char* host, unsigned short port,
     char* name, char* type, struct ilon_data* pdata) {
-  SXMLParser* parser;
+  SXMLExplorer* explorer;
 
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
     "POST /WSDL/iLON100.WSDL HTTP/1.1\r\n"
@@ -169,27 +169,27 @@ int readProperty(char* host, unsigned short port,
       gotvalue = 1;
     }
     if (gotvalue == 1 && priority > 0) {
-      return SXMLParserStop;
+      return SXMLExplorerStop;
     }
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
 
   unsigned char contentParse(char *name) {
     strcpy(content, name);
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
 
   unsigned char keyParse(char *name) {
     strcpy(key, name);
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
   unsigned char valueParse(char *name) {
     strcpy(value, name);
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
 
-  parser = sxml_init_parser();
-  sxml_register_func(parser, &tagParse, &contentParse, &keyParse, &valueParse);
+  explorer = sxml_make_explorer();
+  sxml_register_func(explorer, &tagParse, &contentParse, &keyParse, &valueParse);
 
   // generate the request packet
   sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)name);
@@ -210,10 +210,10 @@ int readProperty(char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  unsigned char ret = sxml_run_parser(parser, (char *)rs_packet);
-  sxml_destroy_parser(parser);
+  unsigned char ret = sxml_run_explorer(explorer, (char *)rs_packet);
+  sxml_destroy_explorer(explorer);
 
-  if (ret == SXMLParserInterrupted) {
+  if (ret == SXMLExplorerInterrupted) {
     pdata->priority = priority;
   } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
@@ -231,7 +231,7 @@ int readProperty(char* host, unsigned short port,
 int writeProperty(char* host, unsigned short port,
                  char* name,
                  struct ilon_data* pdata){
-  SXMLParser* parser;
+  SXMLExplorer* explorer;
 
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
     "POST /WSDL/iLON100.WSDL HTTP/1.1\r\n"
@@ -264,28 +264,28 @@ int writeProperty(char* host, unsigned short port,
   unsigned char tagParse(char *name) {
     if (strcmp(name, "/UCPTfaultCount") == 0 &&
         strcmp("0", content) == 0) {
-      return SXMLParserStop;
+      return SXMLExplorerStop;
     }
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
 
   unsigned char contentParse(char *name) {
     strcpy(content, name);
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
 
   unsigned char keyParse(char *name) {
     strcpy(key, name);
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
 
   unsigned char valueParse(char *name) {
     strcpy(value, name);
-    return SXMLParserContinue;
+    return SXMLExplorerContinue;
   }
 
-  parser = sxml_init_parser();
-  sxml_register_func(parser, &tagParse, &contentParse, &keyParse, &valueParse);
+  explorer = sxml_make_explorer();
+  sxml_register_func(explorer, &tagParse, &contentParse, &keyParse, &valueParse);
 
   // generate the request packet
   sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)name, pdata->type, pdata->value, pdata->priority);
@@ -305,10 +305,10 @@ int writeProperty(char* host, unsigned short port,
   }
 
   unsigned char ret;
-  ret = sxml_run_parser(parser, (char *)rs_packet);
-  sxml_destroy_parser(parser);
+  ret = sxml_run_explorer(explorer, (char *)rs_packet);
+  sxml_destroy_explorer(explorer);
 
-  if (ret == SXMLParserInterrupted) {
+  if (ret == SXMLExplorerInterrupted) {
   } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);

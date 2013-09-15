@@ -1004,28 +1004,28 @@ int ilonssGW_readConfig(const char* configPath){
       }else if(strcmp("DATAPOOL_TIMESPAN_MIN",columns[0])==0){
         m_datapool_timespan=atoi(columns[1]);
 
-      }else if(strcmp("BIF",columns[0])==0){
+      }else if(strcmp("IIF",columns[0])==0){
         if(n_columns!=9){
-          ilonssGW_log("Too many columns found in BIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+          ilonssGW_log("Too many columns found in IIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
 	}
 
         struct ilonssGW_baseConfig conf;
         memset(&conf,0,sizeof(conf));
         if(strlen(columns[1])>=IEEE1888_ILONSS_POINTID_LEN){
-          ilonssGW_log("The length of point id (in BIF) is too long\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+          ilonssGW_log("The length of point id (in IIF) is too long\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
         strcpy(conf.point_id,columns[1]);
 
         if(strlen(columns[2])>=IEEE1888_ILONSS_HOSTNAME_LEN){
-          ilonssGW_log("The length of hostname (in BIF) is too long\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+          ilonssGW_log("The length of hostname (in IIF) is too long\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
         strcpy(conf.host,columns[2]);
 
         if(strtol(columns[3],NULL,0)<1 || strtol(columns[3],NULL,0)>=65536){
-          ilonssGW_log("Invalid port number is specified in BIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+          ilonssGW_log("Invalid port number is specified in IIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
         conf.port=(uint16_t)strtol(columns[3],NULL,0);
@@ -1033,14 +1033,14 @@ int ilonssGW_readConfig(const char* configPath){
         strcpy(conf.object_id, columns[4]);
 
         if(strlen(columns[5]) >= 1024){
-          ilonssGW_log("Invalid property id is specified in BIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+          ilonssGW_log("Invalid property id is specified in IIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
 	
         strcpy(conf.data_type, columns[5]);
 
         if(strtol(columns[6],NULL,0)<1 || strtol(columns[6],NULL,0)>=65536){
-          ilonssGW_log("Invalid priority is specified in BIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+          ilonssGW_log("Invalid priority is specified in IIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
         conf.priority = (int)strtol(columns[6],NULL,0);
@@ -1054,7 +1054,7 @@ int ilonssGW_readConfig(const char* configPath){
         }else if(strcmp("",columns[7])==0){
           conf.permission=IEEE1888_ILONSS_ACCESS_NONE;
         }else{
-          ilonssGW_log("Unknown access permission is specifed in BIF (only R, W, RW are allowed)\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+          ilonssGW_log("Unknown access permission is specifed in IIF (only R, W, RW are allowed)\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
         int exp=atoi(columns[8]);
@@ -1073,13 +1073,13 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_writeServer_ids[n_m_writeServer_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no write permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no write permission at iLon interface (check the corresponding IIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
         }else{
           char logbuf[1024];
-          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          sprintf(logbuf,"Point id at %s,%s is not defined by IIF before.\n",columns[0],columns[1]);
           ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
@@ -1091,13 +1091,13 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_fetchServer_ids[n_m_fetchServer_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no read permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no read permission at iLon interface (check the corresponding IIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
         }else{
           char logbuf[1024];
-          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          sprintf(logbuf,"Point id at %s,%s is not defined by IIF before.\n",columns[0],columns[1]);
           ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
@@ -1114,13 +1114,13 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_writeClient_ids[n_m_writeClient_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no read permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no read permission at iLon interface (check the corresponding IIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
         }else{
           char logbuf[1024];
-          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          sprintf(logbuf,"Point id at %s,%s is not defined by IIF before.\n",columns[0],columns[1]);
           ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
@@ -1137,13 +1137,13 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_fetchClient_ids[n_m_fetchClient_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no write permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no write permission at iLon interface (check the corresponding IIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
         }else{
           char logbuf[1024];
-          sprintf(logbuf,"Point id at %s,%s is not defined by BIF before.\n",columns[0],columns[1]);
+          sprintf(logbuf,"Point id at %s,%s is not defined by IIF before.\n",columns[0],columns[1]);
           ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
@@ -1151,7 +1151,7 @@ int ilonssGW_readConfig(const char* configPath){
 
       // error check
       if(n_m_config>IEEE1888_ILONSS_POINT_COUNT){
-        ilonssGW_log("ERROR: too many BIFs\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+        ilonssGW_log("ERROR: too many IIFs\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
         fclose(fp); return IEEE1888_ILONSS_ERROR;
       }
       if(n_m_writeServer_ids>IEEE1888_ILONSS_POINT_COUNT){
@@ -1287,7 +1287,7 @@ void ilonssGW_printConfig(FILE* fp){
     default: strcpy(spermission,"ERROR");
     }
 
-    fprintf(fp,"BIF,%s,%s,%d,%s,%s,%s,%d\n",p->point_id,p->host,p->port,p->object_id,sdatatype,spermission,p->exp);
+    fprintf(fp,"IIF,%s,%s,%d,%s,%s,%s,%d\n",p->point_id,p->host,p->port,p->object_id,sdatatype,spermission,p->exp);
   }
   
   for(i=0;i<n_m_writeServer_ids;i++){
