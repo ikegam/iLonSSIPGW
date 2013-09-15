@@ -5,7 +5,10 @@ CFLAGS = -Wall -g -O0 -I./sparsexml
 
 all:	ieee1888_ilonss_gw
 
-ilonss.o: ilonss.c
+sparsexml:
+	git clone https://github.com/ikegam/sparsexml.git
+
+ilonss.o: ilonss.c sparsexml
 	(cd sparsexml; make)
 	$(CC) -c -Wall -g -O0 $(CFLAGS) $< sparsexml/sparsexml.c
 
