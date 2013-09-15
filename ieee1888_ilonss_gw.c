@@ -1,5 +1,5 @@
 /*
- * IEEE1888 - BACnet/IP GW
+ * IEEE1888 - iLon/IP GW
  *
  * author: Hideya Ochiai
  * create: 2012-10-03
@@ -20,7 +20,7 @@
 #include "ieee1888_datapool.h"
 
 #define IEEE1888_ILONSS_POINTID_LEN     256
-#define IEEE1888_ILONSS_VALUE_LEN        20
+#define IEEE1888_ILONSS_VALUE_LEN      1024
 #define IEEE1888_ILONSS_TIME_LEN         32
 #define IEEE1888_ILONSS_POINT_COUNT    1024
 #define IEEE1888_ILONSS_HOSTNAME_LEN     64
@@ -148,7 +148,7 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
 
       time_t now=time(NULL);
       if(now<start || now>start+IEEE1888_ILONSS_BULK_SESSION_TIMEOUT){
-        ilonssGW_log("BACnet bulk session(read) timedout\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+        ilonssGW_log("iLon bulk session(read) timedout\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
         return IEEE1888_ILONSS_ERROR;
       }
 
@@ -221,55 +221,6 @@ int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][
       // load into the status buffer
       config->status_time=time(NULL);
       strncpy(config->status_value,value_str,IEEE1888_ILONSS_VALUE_LEN);
-
-      if(config->exp<0){
-        int len=strlen(value_str);
-        char* pdot=strstr(value_str,".");
-        if(pdot==NULL){
-          // if no dot(.)
-          int k;
-          for(k=0;k<-config->exp;k++){
-            value_str[len+k]='0';
-          }
-        }else{
-          // if dot(.) found
-          int k;
-          char* pend=pdot-config->exp;
-          int end_len=pend-value_str+1;
-          for(k=len;k<end_len;k++){  // fill by '0' if not presented
-            value_str[k]='0';
-          }
-          for(k=0;k<-config->exp;k++){  // shift (for removing dot(.))
-            *(pdot+k)=*(pdot+k+1);
-          }
-          *pend='\0';                  // finish (by pending null character)
-        }
-
-      }else if(config->exp>0){
-        int len=strlen(value_str);
-        char* pdot=strstr(value_str,".");
-        if(pdot!=NULL){
-          len=pdot-value_str;
-        }
-
-        if(value_str[0]!='-'){ // if non-negative
-          if(config->exp>=len){
-            value_str[0]='0';
-            value_str[1]='\0';
-          }else{
-            value_str[len-config->exp]='\0';
-          }
-        }else{ // if negative
-          if(config->exp+1>=len){
-            value_str[0]='0';
-            value_str[1]='\0';
-          }else{
-            value_str[len-config->exp]='\0';
-          }
-        }
-
-      }else{
-      }
     }
   }
   
@@ -284,7 +235,7 @@ int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][
       
       time_t now=time(NULL);
       if(now<start || now>start+IEEE1888_ILONSS_BULK_SESSION_TIMEOUT){
-        ilonssGW_log("BACnet bulk session(write) timedout\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
+        ilonssGW_log("iLon bulk session(write) timedout\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
         return IEEE1888_ILONSS_ERROR;
       }
       
@@ -297,6 +248,8 @@ int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][
       if(k<n_black_host){
         continue;
       }
+
+      strcpy(bdata[i].value, config->status_value);
       strcpy(bdata[i].type, config->data_type);
       bdata[i].priority = config->priority;
 
@@ -306,9 +259,9 @@ int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][
         // SUCCESS
       }else{
         char logbuf[1000];
-        sprintf(logbuf,"Failed to set the data of %s into BACnet\n",config->point_id);
+        sprintf(logbuf,"Failed to set the data of %s into iLon\n",config->point_id);
         ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
-        
+
         if(n_black_host<8){
           strcpy(black_host[n_black_host],config->host);
           n_black_host++;
@@ -322,7 +275,6 @@ int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][
   if(n_black_host>0){
     return IEEE1888_ILONSS_ERROR;
   }
-
   return IEEE1888_ILONSS_OK;
 }
 
@@ -334,7 +286,7 @@ ieee1888_error* ilonssGW_ieee1888read(ieee1888_point point[], int n_point, time_
 
   uint8_t access[n_point];
   memset(access,IEEE1888_ILONSS_ACCESS_READ,sizeof(access));
-  
+
   int i;
   char ids[n_point][IEEE1888_ILONSS_POINTID_LEN];
   for(i=0;i<n_point;i++){
@@ -345,12 +297,12 @@ ieee1888_error* ilonssGW_ieee1888read(ieee1888_point point[], int n_point, time_
     }
     strncpy(ids[i],point[i].id,IEEE1888_ILONSS_POINTID_LEN);
   }
-  
+
   ieee1888_error* myerr=ilonssGW_pointsTest(ids,access,n_point);
   if(myerr!=NULL){
     return myerr;
   }
-  
+
   char values[n_point][IEEE1888_ILONSS_VALUE_LEN];
   time_t times[n_point];
   if(ilonssGW_bacnetRead(ids,times,values,n_point)==IEEE1888_ILONSS_OK){
@@ -849,7 +801,7 @@ void* ilonssGW_writeClient_thread(void* args){
       rq_body->n_point=n_point;
 
       ieee1888_transport* rs_transport=ieee1888_client_data(rq_transport,m_writeClient_ieee1888_server_url,NULL,NULL);
-      ieee1888_dump_objects((ieee1888_object*)rq_transport);
+      //ieee1888_dump_objects((ieee1888_object*)rq_transport);
       if(rs_transport!=NULL && rs_transport->header!=NULL && rs_transport->header->OK!=NULL){
         ilonssGW_log("writeClient success\n",IEEE1888_ILONSS_LOGLEVEL_INFO);
       }else{
@@ -1091,7 +1043,7 @@ int ilonssGW_readConfig(const char* configPath){
           ilonssGW_log("Invalid priority is specified in BIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
-        conf.priority = (int)strtol(columns[3],NULL,0);
+        conf.priority = (int)strtol(columns[6],NULL,0);
 
         if(strcmp("R",columns[7])==0){
           conf.permission=IEEE1888_ILONSS_ACCESS_READ;
@@ -1121,7 +1073,7 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_writeServer_ids[n_m_writeServer_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no write permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no write permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
@@ -1139,7 +1091,7 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_fetchServer_ids[n_m_fetchServer_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no read permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no read permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
@@ -1162,7 +1114,7 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_writeClient_ids[n_m_writeClient_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no read permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no read permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
@@ -1185,7 +1137,7 @@ int ilonssGW_readConfig(const char* configPath){
             strcpy(m_fetchClient_ids[n_m_fetchClient_ids++],columns[1]);
           }else{
             char logbuf[1024];
-            sprintf(logbuf,"Point id at %s,%s has no write permission at BACnet interface (check the corresponding BIF section)\n",columns[0],columns[1]);
+            sprintf(logbuf,"Point id at %s,%s has no write permission at iLon interface (check the corresponding BIF section)\n",columns[0],columns[1]);
             ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_ERROR);
             fclose(fp); return IEEE1888_ILONSS_ERROR;
           }
@@ -1234,23 +1186,21 @@ void ilonssGW_printStatus(FILE* fp){
   
   ilonssGW_log("ilonssGW_printStatus(begin)\n", IEEE1888_ILONSS_LOGLEVEL_INFO);
   
-  fprintf(fp,"<html><header><title>IEEE1888 - BACnet/IP GW Status Page</title>\n");
+  fprintf(fp,"<html><header><title>IEEE1888 - iLon/IP GW Status Page</title>\n");
   fprintf(fp,"<style type=\"text/css\">\n");
   fprintf(fp,"#header  {BACKGROUND-COLOR:#99ffcc; TEXT-ALIGN:CENTER;} \n");
   fprintf(fp,"#oddrow  {BACKGROUND-COLOR:#f0f0ff; TEXT-ALIGN:LEFT;}   \n");
   fprintf(fp,"#evenrow {BACKGROUND-COLOR:#f8f8ff; TEXT-ALIGN:LEFT;} \n");
   fprintf(fp,"</style></header><body>\n");
-  fprintf(fp,"<h1>IEEE1888 - BACnet/IP GW Status Page</h1>\n");
+  fprintf(fp,"<h1>IEEE1888 - iLon/IP GW Status Page</h1>\n");
   fprintf(fp,"<table border=\"2\">");
   fprintf(fp,"<tr id=\"header\">\n");
   fprintf(fp,"<td>IEEE1888 Point ID</td>\n");
-  fprintf(fp,"<td>BACnet/IP HostName</td>\n");
+  fprintf(fp,"<td>iLon/IP HostName</td>\n");
   fprintf(fp,"<td>UDP Port</td>\n");
   fprintf(fp,"<td>Object ID</td>\n");
-  fprintf(fp,"<td>Property ID</td>\n");
   fprintf(fp,"<td>Type</td>\n");
   fprintf(fp,"<td>Permission</td>\n");
-  fprintf(fp,"<td>Multiply by</td>\n");
   fprintf(fp,"<td>Time</td>\n");
   fprintf(fp,"<td>Value</td>\n");
   fprintf(fp,"</tr>\n");
@@ -1260,7 +1210,6 @@ void ilonssGW_printStatus(FILE* fp){
   int i; 
   for(i=0;i<n_m_config;i++){
     struct ilonssGW_baseConfig* p=&m_config[i];
-    char sdatatype[10];
     char spermission[10];
     char stime[40];
     struct tm tm_time;
@@ -1288,11 +1237,10 @@ void ilonssGW_printStatus(FILE* fp){
     fprintf(fp,"<tr id=\"%s\">\n",style);
     fprintf(fp,"<td>%s</td>\n",p->point_id);
     fprintf(fp,"<td>%s</td>\n",p->host);
-    fprintf(fp,"<td>%05d</td>\n",p->port);
+    fprintf(fp,"<td>%5d</td>\n",p->port);
     fprintf(fp,"<td>%s</td>\n",p->object_id);
-    fprintf(fp,"<td>%s</td>\n",sdatatype);
+    fprintf(fp,"<td>%s</td>\n",p->data_type);
     fprintf(fp,"<td>%s</td>\n",spermission);
-    fprintf(fp,"<td>10^%d</td>\n",p->exp);
     fprintf(fp,"<td>%s</td>\n",stime);
     if(strlen(p->status_value)==0){
       fprintf(fp,"<td> </td>\n");

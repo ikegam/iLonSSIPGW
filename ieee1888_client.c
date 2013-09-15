@@ -87,9 +87,11 @@ int ieee1888_soap_client(const char* soapEPR, const char* send_msg, char* recv_m
   free(buffer);
 
   // for debug
+  /*
   printf("host: %s\n",host);
   printf("port: %d\n",port);
   printf("dir:  %s\n",dir);
+  */
   /* ---- Step 1 : parse soapEPR (end) ---- */
   
   /* ---- Step 2 : create connection to the server (begin) ---- */

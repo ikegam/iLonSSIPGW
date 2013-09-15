@@ -18,3 +18,5 @@ ieee1888_ilonss_gw: ieee1888_ilonss_gw.o $(COMMON_OBJS)
 clean: 
 	(cd sparsexml; make clean)
 	rm -f *.o ieee1888_ilonss_gw.o ieee1888_ilonss_gw
+
+.PHONY:clean all

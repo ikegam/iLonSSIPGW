@@ -23,9 +23,6 @@
 #define ILONSS_PACKET_MAX_LEN 100000
 #define ILONSS_RESP_TIMEOUT 3
 
-
-SXMLParser* parser;
-
 void ilonss_recv_fail(int signum){
   // logging the error;
   // fprintf(stdout,"ilonss_recv_fail -- response timedout\n");
@@ -38,6 +35,7 @@ int ilonss_invoke(const char* host, unsigned short port,
   struct sockaddr_in s0;
   struct sockaddr_in s1;
   int recvlen;
+
 
   if((sock=socket(AF_INET,SOCK_STREAM,0))<0){
     fprintf(stderr,"Socket error\n");
@@ -113,6 +111,10 @@ int ilonss_invoke(const char* host, unsigned short port,
 
   strcpy((char *)rs, strstr((char *)rs, "\r\n\r\n") + 4);
 
+#ifdef __DEBUG
+  printf("sent %s\n\n and received %s\n", rq, rs);
+#endif
+
   return ILONSS_OK;
 }
 
@@ -125,8 +127,7 @@ int ilonss_invoke(const char* host, unsigned short port,
 
 int readProperty(char* host, unsigned short port,
     char* name, char* type, struct ilon_data* pdata) {
-
-  printf("%s, %d, %s, %s\r\n", host, port, name, type);
+  SXMLParser* parser;
 
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
     "POST /WSDL/iLON100.WSDL HTTP/1.1\r\n"
@@ -195,17 +196,12 @@ int readProperty(char* host, unsigned short port,
   sprintf((char *)rq_packet, (char *)rq_packet_fmt, strlen((char *)rq_packet_body), (char *)host);
   strcat((char *)rq_packet, (char *)rq_packet_body);
 
-  printf("requested: %s", rq_packet);
-  printf("\r\n");
-
   // invoke the remote bacnet object
   int n_rs_packet=0;
-  if (ilonss_invoke(host,port,rq_packet, 
+  if (ilonss_invoke(host,port,rq_packet,
         strlen((char *)rq_packet), rs_packet, &n_rs_packet)!=ILONSS_OK) {
     return ILONSS_NG;
   }
-  printf("\r\n");
-  printf("received: %s", rs_packet);
 
   // parse and verify the response packet
   if (n_rs_packet<1000) {
@@ -234,7 +230,8 @@ int readProperty(char* host, unsigned short port,
 
 int writeProperty(char* host, unsigned short port,
                  char* name,
-		 struct ilon_data* pdata){
+                 struct ilon_data* pdata){
+  SXMLParser* parser;
 
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
     "POST /WSDL/iLON100.WSDL HTTP/1.1\r\n"
@@ -281,6 +278,7 @@ int writeProperty(char* host, unsigned short port,
     strcpy(key, name);
     return SXMLParserContinue;
   }
+
   unsigned char valueParse(char *name) {
     strcpy(value, name);
     return SXMLParserContinue;
@@ -294,8 +292,6 @@ int writeProperty(char* host, unsigned short port,
   sprintf((char *)rq_packet, (char *)rq_packet_fmt, strlen((char *)rq_packet_body), host);
   strcat((char *)rq_packet, (char *)rq_packet_body);
 
-  printf("%s", rq_packet);
-
   int n_rs_packet=0;
   if (ilonss_invoke(host,port,rq_packet, strlen((char *)rq_packet),rs_packet,&n_rs_packet)!=ILONSS_OK) {
     return ILONSS_NG;
@@ -308,10 +304,12 @@ int writeProperty(char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  unsigned char ret = sxml_run_parser(parser, (char *)rs_packet);
+  unsigned char ret;
+  ret = sxml_run_parser(parser, (char *)rs_packet);
   sxml_destroy_parser(parser);
 
-  if (ret != SXMLParserInterrupted) {
+  if (ret == SXMLParserInterrupted) {
+  } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);
     return ILONSS_NG;
@@ -321,12 +319,11 @@ int writeProperty(char* host, unsigned short port,
 }
 
 /*
-
 int main(int argc, char* argv[]){
 
    struct ilon_data data;
 
-   if(readProperty("192.168.0.146", 80, "Net/LON/iLON App/Digital Output 1/nvoClaValueFb_1", "UCPTvalueDef", &data)==ILONSS_OK){
+   if(readProperty("192.168.0.4", 80, "Net/LON/iLON App/Digital Output 1/nvoClaValueFb_1", "UCPTvalueDef", &data)==ILONSS_OK){
      printf("INFO: data type %s %s %d\n",data.type, data.value, data.priority);
    }else{
      printf("Error");
@@ -341,7 +338,7 @@ int main(int argc, char* argv[]){
    strcpy(data.type, "UCPTvalueDef");
    data.priority=255;
 
-   if(writeProperty("192.168.0.146", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
+   if(writeProperty("192.168.0.4", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
       printf("success..\n");
    }else{
       printf("error..\n");

@@ -27,7 +27,6 @@
 // TODO: configulation parameters (-> ieee1888_config.h)
 #define IEEE1888_EPR_PATH "/IEEE1888GW"
 #define IEEE1888_WSDL_PATH "/IEEE1888GW?wsdl"
-#define LOCAL_ROOT_DIR "/var/www"
 
 #define SEND_MSG_BUFSIZE 262144
 #define RECV_MSG_BUFSIZE 262144
@@ -336,8 +335,8 @@ void* ieee1888_server_http_session_mgmt(){
 
 void* ieee1888_server_http_proc(void* args){
 
-   struct __ieee1888_server_http_session* session=
-      (struct __ieee1888_server_http_session*)args;
+  struct __ieee1888_server_http_session* session=
+    (struct __ieee1888_server_http_session*)args;
 
   int cs=session->socket;
 
@@ -353,7 +352,7 @@ void* ieee1888_server_http_proc(void* args){
   // if(http_recv_buffer==NULL || line==NULL || recv_msg==NULL){
   //
   // }
-	
+
   // content of the header
   // int http_success=0;
   char http_request_path[256];
@@ -385,18 +384,18 @@ void* ieee1888_server_http_proc(void* args){
         p=http_recv_buffer+needle;
         q=strstr(p,"\r\n");
         int n=q-p;
-	if(q!=NULL && n>=RECV_MSG_LINESIZE){
-	  err_buffer_overrun=1;
-	  n=RECV_MSG_LINESIZE-1;
-	}
+        if(q!=NULL && n>=RECV_MSG_LINESIZE){
+          err_buffer_overrun=1;
+          n=RECV_MSG_LINESIZE-1;
+        }
         is_newline=0;
-        
-	if(q!=NULL){
+
+        if(q!=NULL){
           strncpy(line,p,n);
           line[n]='\0';
           needle+=n+2;
-	  is_newline=1;
-	}else if(!parse_header && strlen(p)>0){
+          is_newline=1;
+        }else if(!parse_header && strlen(p)>0){
           strcpy(line,p);
           needle+=strlen(line);
         }else{
@@ -413,13 +412,13 @@ void* ieee1888_server_http_proc(void* args){
           if(n>0){
             if(strstr(line,"GET")==line){
               http_method=HTTP_METHOD_GET;
-              
-	      int j;
-	      for(j=4;line[j]!=' ' && j<256;j++){
+
+              int j;
+              for(j=4;line[j]!=' ' && j<256;j++){
                 http_request_path[j-4]=line[j];
               }
               http_request_path[j-4]='\0';
-	    
+
             }else if(strstr(line,"POST")==line){
               http_method=HTTP_METHOD_POST;
 
@@ -427,10 +426,10 @@ void* ieee1888_server_http_proc(void* args){
               for(j=5;line[j]!=' ' && j<256;j++){
                 http_request_path[j-5]=line[j];
               }
-	      http_request_path[j-5]='\0';
- 
+              http_request_path[j-5]='\0';
+
             }else if(strstr(line,"Transfer-Encoding: ")==line){
-	      if(strstr(line,"chunked")!=NULL){
+              if(strstr(line,"chunked")!=NULL){
                 http_transfer_encoding=1;
               }
             }else if(strstr(line,"Content-Length: ")==line){
@@ -439,127 +438,127 @@ void* ieee1888_server_http_proc(void* args){
                 http_content_length=atoi(p+2);
                 fflush(stdout);
               }
-	    }else if(strstr(line,"Expect: 100-continue")==line){
+            }else if(strstr(line,"Expect: 100-continue")==line){
               char buffer[]="HTTP/1.1 100 Continue\r\n\r\n";
               int len=strlen(buffer);
-	      write(cs,buffer,len);
-	    }
-	  }else{
-	    parse_header=0;
+              write(cs,buffer,len);
+            }
+          }else{
+            parse_header=0;
 
-	    // printf("parse header ended \n"); fflush(stdout);
-	    if(http_method==HTTP_METHOD_GET){
+            // printf("parse header ended \n"); fflush(stdout);
+            if(http_method==HTTP_METHOD_GET){
               finish=1;
             }
-	  }
+          }
 
-	}else{  // parse body lines
-	  
+        }else{  // parse body lines
+
           if(http_transfer_encoding){  // for Transfer-Encoding: chunked
 
             // for debug
-	    // char buf[10];
-	    // strncpy(buf,line,10);
-	    // buf[9]='\0';
-	    // printf("M=%d: %s\n",http_next_transfer_body,buf);
-	    // fflush(stdout);
+            // char buf[10];
+            // strncpy(buf,line,10);
+            // buf[9]='\0';
+            // printf("M=%d: %s\n",http_next_transfer_body,buf);
+            // fflush(stdout);
 
             if(!http_next_transfer_body){
-              
-	      // calc length
+
+              // calc length
               int len=0;
               int i=0;
               for(i=0;i<20 && line[i]!='\0';i++){
                 len*=16;
                 if('0'<= line[i] && line[i]<='9'){
                   len+=(line[i]-'0');
-		}else if(line[i]=='a' || line[i]=='A'){
-		  len+=10;
-		}else if(line[i]=='b' || line[i]=='B'){
-		  len+=11;
-		}else if(line[i]=='c' || line[i]=='C'){
-		  len+=12;
+                }else if(line[i]=='a' || line[i]=='A'){
+                  len+=10;
+                }else if(line[i]=='b' || line[i]=='B'){
+                  len+=11;
+                }else if(line[i]=='c' || line[i]=='C'){
+                  len+=12;
                 }else if(line[i]=='d' || line[i]=='D'){
-		  len+=13;
-		}else if(line[i]=='e' || line[i]=='E'){
-		  len+=14;
-		}else if(line[i]=='f' || line[i]=='F'){
-		  len+=15;
-		}
-	      }
-
-	      if(i>0){
-                http_next_transfer_length=len;
-                http_next_transfer_body=1;
-  	        http_next_transfer_received=0;
+                  len+=13;
+                }else if(line[i]=='e' || line[i]=='E'){
+                  len+=14;
+                }else if(line[i]=='f' || line[i]=='F'){
+                  len+=15;
+                }
               }
 
-	    }else{
+              if(i>0){
+                http_next_transfer_length=len;
+                http_next_transfer_body=1;
+                http_next_transfer_received=0;
+              }
 
-	      if(http_next_transfer_length!=0){
+            }else{
+
+              if(http_next_transfer_length!=0){
                 // check the remaining length (raises err_buffer_overrun and drop the received data if overrun)
                 int copy_length=strlen(line);
-	        if(l_recv_msg<http_next_transfer_length+2){ // +2 for \r\n (if is_newline==1)
+                if(l_recv_msg<http_next_transfer_length+2){ // +2 for \r\n (if is_newline==1)
                   err_buffer_overrun=1;
                   copy_length=l_recv_msg;
-		}
+                }
 
                 // copy the body
                 strncpy(p_recv_msg,line,copy_length);
-		p_recv_msg+=copy_length;
-		r_recv_msg+=copy_length;
+                p_recv_msg+=copy_length;
+                r_recv_msg+=copy_length;
                 l_recv_msg-=copy_length;
-		http_next_transfer_received+=copy_length;
-		if(http_next_transfer_received<http_next_transfer_length
-		  && is_newline){
+                http_next_transfer_received+=copy_length;
+                if(http_next_transfer_received<http_next_transfer_length
+                    && is_newline){
                   strncpy(p_recv_msg,"\r\n",2);
-		  p_recv_msg+=2;
-		  r_recv_msg+=2;
+                  p_recv_msg+=2;
+                  r_recv_msg+=2;
                   l_recv_msg-=2;
-		  http_next_transfer_received+=2;
-		}
-		if(http_next_transfer_received>=http_next_transfer_length){
+                  http_next_transfer_received+=2;
+                }
+                if(http_next_transfer_received>=http_next_transfer_length){
                   http_next_transfer_body=0;
-		}
+                }
 
               }else{
                 // finish
                 finish=1;
-		*p_recv_msg='\0';
-	      }
+                *p_recv_msg='\0';
+              }
             }
 
           }else{  // for Content-Length: ...
             int len=strlen(line);
-	    if(len>=RECV_MSG_LINESIZE){
+            if(len>=RECV_MSG_LINESIZE){
               err_buffer_overrun=1;
-	    }
+            }
 
             // check the remaining length (raises err_buffer_overrun and drop the received data if overrun)
             int copy_length=len;
-	    if(l_recv_msg<len+2){ // +2 for \r\n (if is_newline==1)
+            if(l_recv_msg<len+2){ // +2 for \r\n (if is_newline==1)
               err_buffer_overrun=1;
               copy_length=l_recv_msg;
             }
 
             strncpy(p_recv_msg,line,copy_length);
-	    p_recv_msg+=copy_length;
+            p_recv_msg+=copy_length;
             r_recv_msg+=len;
-	    l_recv_msg-=copy_length;
+            l_recv_msg-=copy_length;
             if(is_newline){
               strncpy(p_recv_msg,"\r\n",2);
               p_recv_msg+=2;
               r_recv_msg+=2;
               l_recv_msg-=2;
-	    }
-	    if(r_recv_msg>=http_content_length){
+            }
+            if(r_recv_msg>=http_content_length){
               finish=1;
-	      *p_recv_msg='\0';
-	    }
+              *p_recv_msg='\0';
+            }
           }
         }
       }
-  
+
       if(finish){
         break;
       }
@@ -576,8 +575,10 @@ void* ieee1888_server_http_proc(void* args){
     }
   }
 
-  // printf("PATH: %s\n",http_request_path);
-  // printf("METHOD: %d\n",http_method);
+  /*
+  printf("PATH: %s\n",http_request_path);
+  printf("METHOD: %d\n",http_method);
+  */
 
   free(http_recv_buffer);
   free(line);
@@ -597,10 +598,10 @@ void* ieee1888_server_http_proc(void* args){
         ieee1888_soap_error_gen("The requested message is too big and failed to accept it!!",send_msg,SEND_MSG_BUFSIZE);
         n_send_msg=strlen(send_msg);
 
-      // if successfully received, parse and process it, and generate the result.
+        // if successfully received, parse and process it, and generate the result.
       }else{
         int message_type;
-	int err_send_buffer_overrun=0;
+        int err_send_buffer_overrun=0;
         ieee1888_transport* request=ieee1888_mk_transport();
 
         if(ieee1888_soap_parse(recv_msg, r_recv_msg, request, &message_type)!=NULL){
@@ -615,9 +616,9 @@ void* ieee1888_server_http_proc(void* args){
                 strcpy(http_content_type,"text/xml;charset=utf-8");
                 if(ieee1888_soap_gen(response, IEEE1888_QUERY_RS, send_msg, SEND_MSG_BUFSIZE)==IEEE1888_SOAP_GEN_ERROR_OVERFLOW){
                   err_send_buffer_overrun=1;
-		}
+                }
                 n_send_msg=strlen(send_msg);
-		    
+
                 // memory recycle
                 ieee1888_destroy_objects((ieee1888_object*)response);
                 free(response);
@@ -628,7 +629,7 @@ void* ieee1888_server_http_proc(void* args){
                 ieee1888_soap_error_gen("query method did not return valid IEEE1888 objects.",send_msg,SEND_MSG_BUFSIZE);
                 n_send_msg=strlen(send_msg);
               }
-  
+
             }else{
               // query method handler is not implemented (out of service)
               // --> soapFault 
@@ -637,7 +638,7 @@ void* ieee1888_server_http_proc(void* args){
               ieee1888_soap_error_gen("query method is out of service.",send_msg,SEND_MSG_BUFSIZE);
               n_send_msg=strlen(send_msg);
             }
-  
+
           }else if(message_type==IEEE1888_DATA_RQ){
             if(__ieee1888_server_data){
               response=__ieee1888_server_data(request,NULL);
@@ -646,13 +647,13 @@ void* ieee1888_server_http_proc(void* args){
                 strcpy(http_content_type,"text/xml;charset=utf-8");
                 if(ieee1888_soap_gen(response, IEEE1888_DATA_RS, send_msg, SEND_MSG_BUFSIZE)==IEEE1888_SOAP_GEN_ERROR_OVERFLOW){
                   err_send_buffer_overrun=1;
-		}
+                }
                 n_send_msg=strlen(send_msg);
-  
+
                 // memory recycle
                 ieee1888_destroy_objects((ieee1888_object*)response);
                 free(response);
-  
+
               }else{
                 // data failed.
                 strcpy(http_response_code,"500 Internal Server Error");
@@ -668,7 +669,7 @@ void* ieee1888_server_http_proc(void* args){
               ieee1888_soap_error_gen("data method is out of service.",send_msg,131072);
               n_send_msg=strlen(send_msg);
             }
-  
+
           }else{
             // unknown message type.
             strcpy(http_response_code,"500 Internal Server Error");
@@ -677,14 +678,14 @@ void* ieee1888_server_http_proc(void* args){
             n_send_msg=strlen(send_msg);
           }
 
-	  if(err_send_buffer_overrun){
+          if(err_send_buffer_overrun){
             // Error Handling at SOAP-level
             strcpy(http_response_code,"500 Internal Server Error");
             strcpy(http_content_type,"text/xml;charset=utf-8");
             ieee1888_soap_error_gen("The response message generated has exceeded the internal buffer size (server application code misunderstood the size of the sending buffer -- try smaller acceptableSize or consider the request)!!",send_msg,SEND_MSG_BUFSIZE);
             n_send_msg=strlen(send_msg);
-	  }
-	
+          }
+
         }else{
           // failed to parse the requested XML strings.
           //  --> soapFault
@@ -712,7 +713,7 @@ void* ieee1888_server_http_proc(void* args){
   }else if(strcmp(http_request_path,IEEE1888_WSDL_PATH)==0){
     strcpy(http_response_code,"200 OK");
     strcpy(http_content_type,"text/xml;charset=utf-8");
-     n_send_msg=ieee1888_server_print_wsdl(send_msg,cs,IEEE1888_EPR_PATH);
+    n_send_msg=ieee1888_server_print_wsdl(send_msg,cs,IEEE1888_EPR_PATH);
   }else{
     // TODO: read from file ( .... currently return not found)
     strcpy(http_response_code,"404 NotFound");
@@ -739,7 +740,7 @@ void* ieee1888_server_http_proc(void* args){
   // detach
   pthread_detach(session->thread);
   session->ttl=0;
-  
+
   // exit
   pthread_exit(NULL);
   return NULL;
@@ -778,7 +779,7 @@ int ieee1888_server_create(int port){
   memset(__ieee1888_session,0,sizeof(__ieee1888_session));
   pthread_mutex_init(&__ieee1888_server_http_session_mx,0);
   pthread_create(&__ieee1888_server_http_session_mgmt,0,ieee1888_server_http_session_mgmt,0);
-  
+
   memset(&sopt,0,sizeof(sopt));
   sopt.family= PF_UNSPEC;
 
@@ -798,13 +799,14 @@ int ieee1888_server_create(int port){
 
   for(res=res0; res && smax < FD_SETSIZE; res=res->ai_next){
     s[smax]=socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    //setsockopt(s[smax], SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
     if (s[smax]<0){
-      // fprintf(stderr,"socket() failed %d\n",s[smax]);
+      fprintf(stderr,"socket() failed %d\n",s[smax]);
       continue;
     }
     if(res->ai_family==PF_LOCAL){
       if(sopt.debug){
-         fprintf(stderr, "skip: ai_family=PF_LOCAL\n");
+        fprintf(stderr, "skip: ai_family=PF_LOCAL\n");
       }
       continue;
     }
@@ -814,7 +816,7 @@ int ieee1888_server_create(int port){
       //    host, sizeof(host),
       //    serv, sizeof(serv),
       //    NI_NUMERICHOST|NI_NUMERICSERV);
-      //fprintf(stderr,"bind(2) failed: [%s]:%s\n",host,serv);
+      //fprintf(stderr,"bind(2) failed: [%s]:%s\n", sopt.host, sopt.service);
       close(s[smax]);
       s[smax]=-1;
       continue;
@@ -823,14 +825,14 @@ int ieee1888_server_create(int port){
       //   host, sizeof(host),
       //   serv, sizeof(serv),
       //   NI_NUMERICHOST|NI_NUMERICSERV);
-      //fprintf(stderr,"bind(2) succeeded: [%s]:%s\n",host,serv);
+      //fprintf(stderr,"bind(2) succ: [%s]:%s\n", sopt.host, sopt.service);
     }
     if(listen(s[smax],backlog)<0){
       // getnameinfo((struct sockaddr *)res->ai_addr, res->ai_addrlen,
       //    host, sizeof(host),
       //    serv, sizeof(serv),
       //    NI_NUMERICHOST|NI_NUMERICSERV);
-      //fprintf(stderr,"listen(2) failed: [%s]:%s\n",host,serv);
+      //fprintf(stderr,"listen(2) failed: [%s]:%s\n", sopt.host, sopt.service);
       close(s[smax]);
       s[smax]=-1;
       continue;
@@ -839,7 +841,7 @@ int ieee1888_server_create(int port){
       //  host, sizeof(host),
       //  serv, sizeof(serv),
       //  NI_NUMERICHOST|NI_NUMERICSERV);
-      //fprintf(stderr,"listen(2) succeeded: [%s]:%s\n",host,serv);
+      //fprintf(stderr,"listen(2) succ: [%s]:%s\n", sopt.host, sopt.service);
     }
 
     if(s[smax]>sock_max){
@@ -847,6 +849,7 @@ int ieee1888_server_create(int port){
     }
     smax++;
   }
+
 
   if(smax==0){
     fprintf(stderr,"no sockets\n");
@@ -872,44 +875,44 @@ int ieee1888_server_create(int port){
       perror("select");
       return IEEE1888_SERVER_ERROR_SOCKET_SELECT;
     }
-    
+
     for(i=0;i<smax;i++){
       if(FD_ISSET(s[i],&rfd)){
         int cs;
 
-	// create a thread to falk into parallel processing !!!
-	cs=accept(s[i],sa,&len);
-	if(cs<0){
-	  perror("accept");
-	  return IEEE1888_SERVER_ERROR_SOCKET_ACCEPT;
-	}
+        // create a thread to falk into parallel processing !!!
+        cs=accept(s[i],sa,&len);
+        if(cs<0){
+          perror("accept");
+          return IEEE1888_SERVER_ERROR_SOCKET_ACCEPT;
+        }
 
-	// create thread (for multiple threads)
-	int j;
-	pthread_mutex_lock(&__ieee1888_server_http_session_mx);
-	for(j=0;j<IEEE1888_SERVER_HTTP_SESSION_COUNT;j++){
-	  if(__ieee1888_session[j].ttl==0){
-	    break;
-	  }
-	}
-	pthread_mutex_unlock(&__ieee1888_server_http_session_mx);
+        // create thread (for multiple threads)
+        int j;
+        pthread_mutex_lock(&__ieee1888_server_http_session_mx);
+        for(j=0;j<IEEE1888_SERVER_HTTP_SESSION_COUNT;j++){
+          if(__ieee1888_session[j].ttl==0){
+            break;
+          }
+        }
+        pthread_mutex_unlock(&__ieee1888_server_http_session_mx);
 
-	if(j<IEEE1888_SERVER_HTTP_SESSION_COUNT){
-	  __ieee1888_session[j].ttl=IEEE1888_SERVER_HTTP_SESSION_TIMEOUT;
-	  __ieee1888_session[j].socket=cs;
-	  
-	  int create_failed=pthread_create(&(__ieee1888_session[j].thread),0,ieee1888_server_http_proc,(void*)&(__ieee1888_session[j]));
-  
+        if(j<IEEE1888_SERVER_HTTP_SESSION_COUNT){
+          __ieee1888_session[j].ttl=IEEE1888_SERVER_HTTP_SESSION_TIMEOUT;
+          __ieee1888_session[j].socket=cs;
+
+          int create_failed=pthread_create(&(__ieee1888_session[j].thread),0,ieee1888_server_http_proc,(void*)&(__ieee1888_session[j]));
+
           if(create_failed){
             // ERROR: failed to create threads
 
-	    close(cs);
-	  }
+            close(cs);
+          }
 
-	}else{
-	  // ERROR: too many sessions -- try later
-	  close(cs);
-	}
+        }else{
+          // ERROR: too many sessions -- try later
+          close(cs);
+        }
       }
     }
   }

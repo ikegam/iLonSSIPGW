@@ -11,7 +11,7 @@ test-sparsexml: sparsexml.o test.o test-private.o
 .c.o:
 	$(CC) $(CFLAGS) -c $<
 
-clean: test-sparsexml
-	rm $^ *.o
+clean:
+	-rm *.o test-sparsexml
 
 .PHONY: clean all test
