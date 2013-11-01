@@ -23,8 +23,6 @@
 #define ILONSS_PACKET_MAX_LEN 100000
 #define ILONSS_RESP_TIMEOUT 3
 
-#define __DEBUG
-
 void ilonss_recv_fail(int signum){
   // logging the error;
   // fprintf(stdout,"ilonss_recv_fail -- response timedout\n");
@@ -295,7 +293,7 @@ int readProperties(char* host, unsigned short port,
 
 int readProperty(char* host, unsigned short port,
     char* name, char* type, struct ilon_data* pdata) {
-  return readProperties(host, port, (char (*)[1024])&name, (char (*)[1024])&type, pdata, 1);
+  return readProperties(host, port, (char (*)[1024])name, (char (*)[1024])type, pdata, 1);
 }
 
 /*
@@ -397,7 +395,7 @@ int main(int argc, char* argv[]){
 
    struct ilon_data data;
 
-   if(readProperty("192.168.0.4", 80, "Net/LON/iLON App/Digital Output 1/nvoClaValueFb_1", "UCPTvalueDef", &data)==ILONSS_OK){
+   if(readProperty("203.178.135.85", 80, "Net/LON/iLON App/Digital Output 1/nvoClaValueFb_1", "UCPTvalueDef", &data)==ILONSS_OK){
      printf("INFO: data type %s %s %d\n",data.type, data.value, data.priority);
    }else{
      printf("Error");
@@ -412,7 +410,7 @@ int main(int argc, char* argv[]){
    strcpy(data.type, "UCPTvalueDef");
    data.priority=255;
 
-   if(writeProperty("192.168.0.4", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
+   if(writeProperty("203.178.135.85", 80, "Net/LON/iLON App/Digital Output 1/nviClaValue_1", &data)==ILONSS_OK){
       printf("success..\n");
    }else{
       printf("error..\n");
