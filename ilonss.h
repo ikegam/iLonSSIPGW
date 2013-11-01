@@ -22,6 +22,9 @@ int readProperty(char* host, unsigned short port,
                  char* name, char* type,
 		 struct ilon_data* pdata);
 
+int readProperties(char* host, unsigned short port,
+        char name[][1024], char type[][1024], struct ilon_data pdata[], int n_points);
+
 int writeProperty(char* host, unsigned short port,
                   char* name,
 		 struct ilon_data* pdata);

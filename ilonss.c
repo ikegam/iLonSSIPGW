@@ -23,6 +23,8 @@
 #define ILONSS_PACKET_MAX_LEN 100000
 #define ILONSS_RESP_TIMEOUT 3
 
+#define __DEBUG
+
 void ilonss_recv_fail(int signum){
   // logging the error;
   // fprintf(stdout,"ilonss_recv_fail -- response timedout\n");
@@ -124,9 +126,8 @@ int ilonss_invoke(const char* host, unsigned short port,
  <?xml version="1.0" encoding="UTF-8"?><env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ilon="http://wsdl.echelon.com/web_services_ns/ilon100/v4.0/message/" xmlns:env="http://schemas.xmlsoap.org/soap/envelope/"><env:Body><ilon:Read><iLonItem><Item><UCPTname>Net/LON/iLON App/Digital Output 1/nviClaValue_1</UCPTname></Item></iLonItem></ilon:Read></env:Body></env:Envelope>
  */
 
-
-int readProperty(char* host, unsigned short port,
-    char* name, char* type, struct ilon_data* pdata) {
+int readProperties(char* host, unsigned short port,
+    char name[][1024], char type[][1024], struct ilon_data pdata[], int n_points) {
   SXMLExplorer* explorer;
 
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
@@ -145,56 +146,124 @@ int readProperty(char* host, unsigned short port,
     " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
     " xmlns:ilon=\"http://wsdl.echelon.com/web_services_ns/ilon100/v4.0/message/\""
     " xmlns:env=\"http://schemas.xmlsoap.org/soap/envelope/\">"
-    "<env:Body><ilon:Read><iLonItem><Item>"
-    "<UCPTname>%s</UCPTname>"
-    "</Item></iLonItem></ilon:Read></env:Body></env:Envelope>";
+    "<env:Body><ilon:Read><iLonItem>"
+    "%s"
+    "</iLonItem></ilon:Read></env:Body></env:Envelope>";
+
+  unsigned char rq_packet_ilonItem_fmt[1024*80] = "";
 
   unsigned char rq_packet_body[ILONSS_PACKET_MAX_LEN];
   unsigned char rq_packet[ILONSS_PACKET_MAX_LEN];
   unsigned char rs_packet[ILONSS_PACKET_MAX_LEN];
 
   char key[1024], value[1024], content[1024];
-  int priority = -1;
 
+/*
+ *         <Item xsi:type="Dp_Data" >
+             <UCPTname>Net/LON/iLON App/VirtFb/nvoHeatCool_207</UCPTname>
+                  <UCPTannotation>Dp_Out;xsi:type=&quot;LON_Dp_Cfg&quot;</UCPTannotation>
+                            <UCPThidden>0</UCPThidden>
+                                 <UCPTlastUpdate>2013-10-17T01:45:06.494+09:00</UCPTlastUpdate>
+                                     <UCPTvalue LonFormat="#0000000000000000[0].SNVT_hvac_mode" Unit="HVAC mode names" >HVAC_AUTO</UCPTvalue>
+                                       <UCPTpointStatus LonFormat="UCPTpointStatus" >AL_NUL</UCPTpointStatus>
+                                   <UCPTpriority>255</UCPTpriority>
+                     </Item>
+ * */
+
+  /* */
   unsigned char tagParse(char *tagname) {
-    static unsigned char gotvalue = 0;
+    int i;
+    static unsigned char in_item = 0;
+    static int process_index = 0;
+    static int nof_processed = 0;
+    static int priority = -1;
+    static char pvalue[10][1024];
+    static char ptype[10][1024];
+    static unsigned char nof_values=0;
+    static unsigned char gotvalue=0;
+
+    if (strcmp(tagname, "Item") == 0) {
+      in_item = 1;
+    } else if (strcmp(tagname, "/Item") == 0) {
+      for (i=0; i<nof_values; i++) {
+        if (strcmp(type[process_index], ptype[i]) == 0) {
+          nof_values = i+1;
+          break;
+        }
+      }
+      strcpy(pdata[process_index].value, pvalue[nof_values-1]);
+      strcpy(pdata[process_index].type, ptype[nof_values-1]);
+      pdata[process_index].priority = priority;
+#ifdef __DEBUG
+      printf("data %s %d, %s, %s, %d\n", name[process_index], process_index, pdata[process_index].value, pdata[process_index].type, priority);
+#endif
+      nof_values = 0;
+      gotvalue=0;
+      in_item = 0;
+
+      nof_processed++;
+      if (nof_processed >= n_points) {
+        nof_processed = 0;
+        return SXMLExplorerStop;
+      }
+    }
+
+    if (in_item != 1) {
+      return SXMLExplorerContinue;
+    }
+
+    if (strcmp(tagname, "/UCPTname") == 0) {
+      for (i=0; i<n_points; i++) {
+        if (strcmp(name[i], content) == 0) {
+          process_index = i;
+        }
+      }
+    }
+
     if (strcmp(tagname, "/UCPTpriority") == 0) {
       priority = atoi(content);
     }
-    if (strcmp(tagname, "/UCPTvalue") == 0 &&
-        strcmp(type, value) == 0 &&
-        strcmp(key, "LonFormat") == 0) {
-      strcpy(pdata->value, content);
-      strcpy(pdata->type, value);
-      gotvalue = 1;
+
+    if (gotvalue ==0 && strcmp(tagname, "/UCPTvalue") == 0) {
+      strcpy(pvalue[nof_values], content);
+      strcpy(ptype[nof_values], value);
+      nof_values++;
+      if (nof_values >= 10) {
+        nof_values=0;
+      }
     }
-    if (gotvalue == 1 && priority > 0) {
-      return SXMLExplorerStop;
-    }
+
     return SXMLExplorerContinue;
   }
 
-  unsigned char contentParse(char *name) {
-    strcpy(content, name);
+  unsigned char contentParse(char *cname) {
+    strcpy(content, cname);
     return SXMLExplorerContinue;
   }
 
-  unsigned char keyParse(char *name) {
-    strcpy(key, name);
+  unsigned char keyParse(char *kname) {
+    strcpy(key, kname);
     return SXMLExplorerContinue;
   }
-  unsigned char valueParse(char *name) {
-    strcpy(value, name);
+  unsigned char valueParse(char *vname) {
+    if (strcmp(key, "LonFormat") ==0) {
+      strcpy(value, vname);
+    }
     return SXMLExplorerContinue;
   }
 
   explorer = sxml_make_explorer();
   sxml_register_func(explorer, &tagParse, &contentParse, &keyParse, &valueParse);
 
-  // generate the request packet
-  sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)name);
+  int i = 0;
+  for (i=0; i<n_points; i++) {
+    sprintf((char *)(rq_packet_ilonItem_fmt+strlen((char *)rq_packet_ilonItem_fmt)), "<Item><UCPTname>%s</UCPTname></Item>\n", name[i]);
+  }
+
+  sprintf((char *)rq_packet_body, (char *)rq_packet_fmt_body, (char *)rq_packet_ilonItem_fmt);
   sprintf((char *)rq_packet, (char *)rq_packet_fmt, strlen((char *)rq_packet_body), (char *)host);
   strcat((char *)rq_packet, (char *)rq_packet_body);
+
 
   // invoke the remote bacnet object
   int n_rs_packet=0;
@@ -214,7 +283,7 @@ int readProperty(char* host, unsigned short port,
   sxml_destroy_explorer(explorer);
 
   if (ret == SXMLExplorerInterrupted) {
-    pdata->priority = priority;
+
   } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);
@@ -222,6 +291,11 @@ int readProperty(char* host, unsigned short port,
   }
 
   return ILONSS_OK;
+}
+
+int readProperty(char* host, unsigned short port,
+    char* name, char* type, struct ilon_data* pdata) {
+  return readProperties(host, port, (char (*)[1024])&name, (char (*)[1024])&type, pdata, 1);
 }
 
 /*
