@@ -351,9 +351,9 @@ ieee1888_error* ilonssGW_ieee1888read(ieee1888_point point[], int n_point, time_
     ilonssGW_log("ilonssGW_ieee1888read(end)\n",IEEE1888_ILONSS_LOGLEVEL_INFO);
     return NULL;
   }else{
-    ilonssGW_log("ilonssGW bacnetRead failed\n",IEEE1888_ILONSS_LOGLEVEL_WARN);
+    ilonssGW_log("ilonssGW ilonssRead failed\n",IEEE1888_ILONSS_LOGLEVEL_WARN);
     ilonssGW_log("ilonssGW_ieee1888read(end)\n",IEEE1888_ILONSS_LOGLEVEL_INFO);
-    return ieee1888_mk_error_server_error("ilonssGW bacnetRead failed");
+    return ieee1888_mk_error_server_error("ilonssGW ilonssRead failed");
   }
 }
 
@@ -412,9 +412,9 @@ ieee1888_error* ilonssGW_ieee1888write(ieee1888_point point[], int n_point){
     ilonssGW_log("ilonssGW_ieee1888write(end)\n",IEEE1888_ILONSS_LOGLEVEL_INFO);
     return NULL;
   }else{
-    ilonssGW_log("ilonssGW bacnetWrite failed\n",IEEE1888_ILONSS_LOGLEVEL_WARN);
+    ilonssGW_log("ilonssGW ilonssWrite failed\n",IEEE1888_ILONSS_LOGLEVEL_WARN);
     ilonssGW_log("ilonssGW_ieee1888write(end)\n",IEEE1888_ILONSS_LOGLEVEL_INFO);
-    return ieee1888_mk_error_server_error("ilonssGW bacnetWrite failed");
+    return ieee1888_mk_error_server_error("ilonssGW ilonssWrite failed");
   }
 }
 
