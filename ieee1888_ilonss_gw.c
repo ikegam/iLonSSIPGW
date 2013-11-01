@@ -134,25 +134,44 @@ int ilonssGW_findConfig(char id[], struct ilonssGW_baseConfig** pconfig){
   return IEEE1888_ILONSS_ERROR;
 }
 
+
+#define NOF_CONCURRENCY 80
 int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[], char values[][IEEE1888_ILONSS_VALUE_LEN], int n_point){
 
-  int i;
+  int i=0, j=0, k, prev_port;
+  char prev_host[IEEE1888_ILONSS_HOSTNAME_LEN];
+
   struct ilonssGW_baseConfig* config;
+  struct ilonssGW_baseConfig* config_list[NOF_CONCURRENCY];
+  char names[NOF_CONCURRENCY][1024];
+  char types[NOF_CONCURRENCY][1024];
   time_t start=time(NULL);
 
   char black_host[8][IEEE1888_ILONSS_HOSTNAME_LEN];
   int n_black_host=0;
 
-  for(i=0;i<n_point;i++){
-    if(ilonssGW_findConfig(ids[i],&config)==IEEE1888_ILONSS_OK){
+  do {
+    int nof_process = NOF_CONCURRENCY;
 
+    if (i+NOF_CONCURRENCY > n_point) {
+      nof_process = n_point - i;
+    }
+
+    ilonssGW_findConfig(ids[0], &config);
+    strcpy(prev_host, config->host);
+    prev_port = config->port;
+    for (j=0; j<nof_process; j++) {
+
+      if(ilonssGW_findConfig(ids[j+i], &config)!=IEEE1888_ILONSS_OK){
+        continue;
+      }
       time_t now=time(NULL);
       if(now<start || now>start+IEEE1888_ILONSS_BULK_SESSION_TIMEOUT){
         ilonssGW_log("iLon bulk session(read) timedout\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
         return IEEE1888_ILONSS_ERROR;
       }
 
-      int k=-1;
+      k=-1;
       for(k=0;k<n_black_host;k++){
         if(strcmp(black_host[k],config->host)==0){
           break;
@@ -161,44 +180,57 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
       if(k<n_black_host){
         continue;
       }
+      if (strcmp(prev_host, config->host) != 0 || prev_port != config->port) {
+        break;
+      }
 
-      // raw read: invoke readProperty
-      struct ilon_data bdata;
-      if(ILONSS_OK == readProperty(config->host,config->port,
-            config->object_id,config->data_type ,
-            &bdata) ){
+      strcpy(names[j], config->object_id);
+      strcpy(types[j], config->data_type);
+      config_list[j] = config;
 
-        char value[IEEE1888_ILONSS_VALUE_LEN];
-        memset(value,0,sizeof(value));
+      strcpy(prev_host, config->host);
+      prev_port = config->port;
+    }
+
+    // raw read: invoke readProperties
+    struct ilon_data bdata[NOF_CONCURRENCY];
+    if (ILONSS_OK == readProperties(config->host,config->port,
+          names, types,
+          bdata, j) ) {
+
+      for (k=0; k<j; k++) {
 
         time_t record_time=time(NULL);
         // copy value to the area of caller
-        strncpy(values[i],bdata.value,IEEE1888_ILONSS_VALUE_LEN);
-        times[i]=record_time;
+        //printf("writing %s, to %d/%d\n", bdata[k].value, k+i, n_point);
+        strncpy(values[k+i],bdata[k].value,IEEE1888_ILONSS_VALUE_LEN);
+        times[k+i]=record_time;
 
         // load into the status buffer
-        config->status_time=record_time;
-        strncpy(config->status_value,bdata.value,IEEE1888_ILONSS_VALUE_LEN);
+        config_list[k]->status_time=record_time;
+        strncpy(config_list[k]->status_value,bdata[k].value,IEEE1888_ILONSS_VALUE_LEN);
+      }
 
-      }else{
-        char logbuf[1000];
-        sprintf(logbuf,"Failed to get data of %s from iLonSS\n",config->point_id);
-        ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_WARN);
+    } else {
+      char logbuf[1000];
+      sprintf(logbuf,"Failed to get data of %s from iLonSS\n",config->point_id);
+      ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_WARN);
 
-        values[i][0]='\0';
-        times[i]=0;
 
-        config->status_time=0;
-        config->status_value[0]='\0';
+      for (k=0; k<j; k++) {
+        values[k+i][0]='\0';
+        times[k+i]=0;
 
-        if(n_black_host<8){
-          strcpy(black_host[n_black_host],config->host);
-          n_black_host++;
-        }
-        // return IEEE1888_ILONSS_ERROR; // error occured during bacnet.readProperty 
+        config_list[k]->status_time=0;
+        config_list[k]->status_value[0]='\0';
+      }
+
+      if(n_black_host<8){
+        strcpy(black_host[n_black_host],config->host);
+        n_black_host++;
       }
     }
-  }
+  } while ( (i+=j) <n_point);
   return IEEE1888_ILONSS_OK;
 }
 
@@ -232,13 +264,14 @@ int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][
   // write processing
   for(i=0;i<n_point;i++){
     if(ilonssGW_findConfig(ids[i],&config)==IEEE1888_ILONSS_OK){
-      
+
       time_t now=time(NULL);
+
       if(now<start || now>start+IEEE1888_ILONSS_BULK_SESSION_TIMEOUT){
         ilonssGW_log("iLon bulk session(write) timedout\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
         return IEEE1888_ILONSS_ERROR;
       }
-      
+
       int k=-1;
       for(k=0;k<n_black_host;k++){
         if(strcmp(black_host[k],config->host)==0){
