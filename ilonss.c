@@ -83,7 +83,6 @@ int ilonss_invoke(const char* host, unsigned short port,
 
     if( send(sock, rq, n_rq,0) == n_rq ){
 #ifdef __DEBUG
-      printf("%s", rq);
       printf("Sending Complete\r\n");
 #endif
       alarm(ILONSS_RESP_TIMEOUT);
@@ -110,10 +109,16 @@ int ilonss_invoke(const char* host, unsigned short port,
     return ILONSS_NG;
   }
 
-  strcpy((char *)rs, strstr((char *)rs, "\r\n\r\n") + 4);
+  char* header_position = strstr((char *)rs, "\r\n\r\n");
+
+  if (header_position == NULL) {
+    return ILONSS_NG;
+  }
+
+  strcpy((char *)rs, header_position + 4);
 
 #ifdef __DEBUG
-  printf("sent %s\n\n and received %s\n", rq, rs);
+  printf("sent\r\n %s\n\nreceived\r\n %s\n", rq, rs);
 #endif
 
   return ILONSS_OK;
@@ -404,7 +409,6 @@ int writeProperty(char* host, unsigned short port,
   sxml_destroy_explorer(explorer);
 
   if (ret == SXMLExplorerInterrupted) {
-    return ILONSS_NG;
   } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);
