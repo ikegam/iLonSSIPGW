@@ -129,6 +129,8 @@ int readProperties(char* host, unsigned short port,
     char name[][1024], char type[][1024], struct ilon_data pdata[], int n_points) {
   SXMLExplorer* explorer;
 
+  char error_occurred = 0;
+
   unsigned char rq_packet_fmt[ILONSS_PACKET_MAX_LEN/2] = 
     "POST /WSDL/iLON100.WSDL HTTP/1.1\r\n"
     "SOAPAction: \"http://wsdl.echelon.com/web_services_ns/ilon100/v4.0/action/Read\"\r\n"
@@ -169,7 +171,16 @@ int readProperties(char* host, unsigned short port,
                      </Item>
  * */
 
-  /* */
+  /*
+   *         <Item>
+   *                         <fault>
+   *                                                 <faultcode faultType="_error">14</faultcode>
+   *                                                                         <faultstring xml:lang="en-US">Name not found Net/LON/iLON App/Digital Output 1/nviClaValue_2</faultstring>
+   *                                                                                         </fault>
+   *                                                                                                         <UCPTname>Net/LON/iLON App/Digital Output 1/nviClaValue_2</UCPTname>
+   *                                                                                                                 </Item>
+   */
+
   unsigned char tagParse(char *tagname) {
     int i;
     static unsigned char in_item = 0;
@@ -205,6 +216,11 @@ int readProperties(char* host, unsigned short port,
         nof_processed = 0;
         return SXMLExplorerStop;
       }
+    }
+
+    if (strcmp(tagname, "fault") == 0) {
+      error_occurred = 1;
+      return SXMLExplorerStop;
     }
 
     if (in_item != 1) {
@@ -283,7 +299,11 @@ int readProperties(char* host, unsigned short port,
   sxml_destroy_explorer(explorer);
 
   if (ret == SXMLExplorerInterrupted) {
-
+    if (error_occurred == 1) {
+      fprintf(stderr, "ERROR: fault is inside of response.");
+      fflush(stderr);
+      return ILONSS_NG;
+    }
   } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);
@@ -384,6 +404,7 @@ int writeProperty(char* host, unsigned short port,
   sxml_destroy_explorer(explorer);
 
   if (ret == SXMLExplorerInterrupted) {
+    return ILONSS_NG;
   } else {
     fprintf(stderr, "ERROR: unexpected packet -- bad packet.");
     fflush(stderr);

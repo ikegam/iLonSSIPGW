@@ -218,11 +218,10 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
 
     } else {
       char logbuf[1000];
-      sprintf(logbuf,"Failed to get data of %s from iLonSS\n",config->point_id);
-      ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_WARN);
-
-
       for (k=0; k<j; k++) {
+        sprintf(logbuf,"Failed to get data of %s from iLonSS\n",config_list[k]->point_id);
+        ilonssGW_log(logbuf,IEEE1888_ILONSS_LOGLEVEL_WARN);
+
         values[k+i][0]='\0';
         times[k+i]=0;
 
