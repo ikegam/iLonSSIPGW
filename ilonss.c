@@ -23,6 +23,8 @@
 #define ILONSS_PACKET_MAX_LEN 100000
 #define ILONSS_RESP_TIMEOUT 3
 
+#define __DEBUG 1
+
 void ilonss_recv_fail(int signum){
   // logging the error;
   // fprintf(stdout,"ilonss_recv_fail -- response timedout\n");
@@ -68,7 +70,7 @@ int ilonss_invoke(const char* host, unsigned short port,
   int try_count=0;
 
 #ifdef __DEBUG
-  printf("Connection Established\r\n");
+  printf("Connection Established: host is %s, port is %d\r\n", host ,port);
 #endif
 
   do{
@@ -273,6 +275,7 @@ int readProperties(char* host, unsigned short port,
   // parse and verify the response packet
   if (n_rs_packet<1000) {
     fprintf(stderr,"ERROR: packet length (response) too short.");
+    fprintf(stderr,"%s", rs_packet);
     fflush(stderr);
     return ILONSS_NG;
   }
@@ -372,6 +375,7 @@ int writeProperty(char* host, unsigned short port,
   // parse and verify the response packet
   if (n_rs_packet<1000) {
     fprintf(stderr,"ERROR: packet length (response) too short.");
+    fprintf(stderr,"%s", rs_packet);
     fflush(stderr);
     return ILONSS_NG;
   }

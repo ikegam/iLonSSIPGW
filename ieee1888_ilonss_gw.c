@@ -153,13 +153,15 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
   do {
     int nof_process = NOF_CONCURRENCY;
 
+
     if (i+NOF_CONCURRENCY > n_point) {
       nof_process = n_point - i;
     }
 
-    ilonssGW_findConfig(ids[0], &config);
+    ilonssGW_findConfig(ids[i], &config);
     strcpy(prev_host, config->host);
     prev_port = config->port;
+
     for (j=0; j<nof_process; j++) {
 
       if(ilonssGW_findConfig(ids[j+i], &config)!=IEEE1888_ILONSS_OK){
@@ -192,11 +194,12 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
       prev_port = config->port;
     }
 
+
     // raw read: invoke readProperties
     struct ilon_data bdata[NOF_CONCURRENCY];
-    if (ILONSS_OK == readProperties(config->host,config->port,
+    if (ILONSS_OK == readProperties(config_list[j-1]->host,config_list[j-1]->port,
           names, types,
-          bdata, j) ) {
+          bdata, j-1) ) {
 
       for (k=0; k<j; k++) {
 
@@ -1350,10 +1353,20 @@ int ilonssGW_logLevel_Threshold;
 pthread_mutex_t ilonssGW_log_mx;
 
 void ilonssGW_log(const char* logMessage, int logLevel){
+  char date_str[256];
+  time_t timer;
+  struct tm *date;
+
   if(logLevel>=ilonssGW_logLevel_Threshold){
     pthread_mutex_lock(&ilonssGW_log_mx);
     FILE* fp=fopen(ilonssGW_logPath,"a");
     if(fp!=NULL){
+
+      timer = time(NULL);
+      date = localtime(&timer);
+      strftime(date_str, 255, "%Y, %B, %d, %A %p%I:%M:%S", date);
+
+      fprintf(fp, "%s: ", date_str);
 
       switch(logLevel){
       case IEEE1888_ILONSS_LOGLEVEL_DEBUG: fprintf(fp,"[DEBUG] "); break;
