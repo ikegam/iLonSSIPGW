@@ -179,9 +179,11 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
           break;
         }
       }
+
       if(k<n_black_host){
         continue;
       }
+
       if (strcmp(prev_host, config->host) != 0 || prev_port != config->port) {
         break;
       }
@@ -199,7 +201,7 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
     struct ilon_data bdata[NOF_CONCURRENCY];
     if (ILONSS_OK == readProperties(config_list[j-1]->host,config_list[j-1]->port,
           names, types,
-          bdata, j-1) ) {
+          bdata, j) ) {
 
       for (k=0; k<j; k++) {
 

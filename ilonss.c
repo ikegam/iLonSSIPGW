@@ -23,8 +23,6 @@
 #define ILONSS_PACKET_MAX_LEN 100000
 #define ILONSS_RESP_TIMEOUT 3
 
-#define __DEBUG 1
-
 void ilonss_recv_fail(int signum){
   // logging the error;
   // fprintf(stdout,"ilonss_recv_fail -- response timedout\n");
@@ -85,6 +83,7 @@ int ilonss_invoke(const char* host, unsigned short port,
 
     if( send(sock, rq, n_rq,0) == n_rq ){
 #ifdef __DEBUG
+      printf("%s", rq);
       printf("Sending Complete\r\n");
 #endif
       alarm(ILONSS_RESP_TIMEOUT);
