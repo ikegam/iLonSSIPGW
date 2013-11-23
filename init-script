@@ -1,0 +1,41 @@
+#! /bin/bash
+pidfile=/var/run/ilonssgw.pid
+name="ieee1888_ilonss_gw"
+prog="/root/iLonSSIPGW/ieee1888_ilonss_gw"
+SSD=/sbin/start-stop-daemon
+start() {
+	echo -n $"Starting $name: "
+	$SSD --start --pidfile $pidfile --make-pidfile --background --exec $prog --user root --  -c /etc/ieee1888_ilonss_gw.conf -l /var/log/ieee1888_ilonss_gw/log -p /var/cache/ieee1888_ilonss_gw/pool
+	RETVAL=$?
+	echo
+	return $RETVAL
+}
+
+stop() {
+	echo -n $"Stopping $name: "
+	$SSD --stop --oknodo --pidfile $pidfile
+        RETVAL=$?
+	echo
+	return $RETVAL
+}
+
+restart() {
+  	stop
+	start
+}
+
+case "$1" in
+  start)
+  	start
+	;;
+  stop)
+  	stop
+	;;
+  restart)
+  	restart
+	;;
+  *)
+	echo $"Usage: $0 {start|stop|reload}"
+	exit 1
+esac
+
