@@ -1,0 +1,3 @@
+[submodule "sparsexml"]
+	path = sparsexml
+	url = https://github.com/ikegam/sparsexml.git
