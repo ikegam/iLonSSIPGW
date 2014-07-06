@@ -19,7 +19,7 @@ ieee1888_ilonss_gw: ieee1888_ilonss_gw.o $(COMMON_OBJS)
 		$(CC) $(COMMON_OBJS) ieee1888_ilonss_gw.o -o ieee1888_ilonss_gw $(LFLAG)
 
 clean: 
-	(cd sparsexml; make clean)
-	rm -f *.o ieee1888_ilonss_gw.o ieee1888_ilonss_gw
+	-(cd sparsexml; make clean)
+	-rm -f *.o ieee1888_ilonss_gw.o ieee1888_ilonss_gw
 
 .PHONY:clean all
