@@ -1,7 +1,6 @@
 CC=gcc
-COMMON_OBJS   = ieee1888_XMLgenerator.o ieee1888_XMLparser.o ieee1888_client.o ieee1888_object_factory.o ieee1888_server.o ieee1888_util.o ieee1888_datapool.o ilonss.o sparsexml/sparsexml.o
-LFLAG = -lpthread
-CFLAGS = -Wall -g -O0 -I./sparsexml
+LFLAG = -lpthread $(shell pkg-config --libs light1888)
+CFLAGS = -Wall -g -O0 -I./sparsexml $(shell pkg-config --cflags light1888)
 
 all:	ieee1888_ilonss_gw
 
@@ -15,8 +14,8 @@ ilonss.o: ilonss.c sparsexml
 .c.o:
 	$(CC) -c -Wall -g -O0 $(CFLAGS) $<
 
-ieee1888_ilonss_gw: ieee1888_ilonss_gw.o $(COMMON_OBJS)
-		$(CC) $(COMMON_OBJS) ieee1888_ilonss_gw.o -o ieee1888_ilonss_gw $(LFLAG)
+ieee1888_ilonss_gw: ieee1888_ilonss_gw.o ilonss.o sparsexml/sparsexml.o
+		$(CC) $^ -o ieee1888_ilonss_gw $(LFLAG)
 
 clean: 
 	-(cd sparsexml; make clean)
