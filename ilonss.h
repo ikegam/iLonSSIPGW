@@ -14,7 +14,9 @@ struct ilon_data {
   int priority;
 };
 
+#ifdef DEBUG
 #define __DEBUG 1
+#endif
 
 #define ILONSS_OK   0
 #define ILONSS_NG   1

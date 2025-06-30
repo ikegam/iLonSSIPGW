@@ -24,6 +24,8 @@
 #define IEEE1888_ILONSS_TIME_LEN         32
 #define IEEE1888_ILONSS_POINT_COUNT    1024
 #define IEEE1888_ILONSS_HOSTNAME_LEN     64
+#define IEEE1888_ILONSS_OBJECT_ID_LEN  1024
+#define IEEE1888_ILONSS_DATA_TYPE_LEN  1024
 
 #define IEEE1888_ILONSS_BULK_SESSION_TIMEOUT 15
 
@@ -46,8 +48,8 @@ struct ilonssGW_baseConfig {
   char point_id[IEEE1888_ILONSS_POINTID_LEN];
   char host[IEEE1888_ILONSS_HOSTNAME_LEN];
   unsigned short port;
-  char object_id[1024];
-  char data_type[1024];
+  char object_id[IEEE1888_ILONSS_OBJECT_ID_LEN];
+  char data_type[IEEE1888_ILONSS_DATA_TYPE_LEN];
   int priority;
   uint8_t permission;
   int8_t exp;
@@ -55,45 +57,45 @@ struct ilonssGW_baseConfig {
   char status_value[IEEE1888_ILONSS_VALUE_LEN];
 };
 
-struct ilonssGW_baseConfig m_config[IEEE1888_ILONSS_POINT_COUNT];
-int n_m_config=0;
+static struct ilonssGW_baseConfig m_config[IEEE1888_ILONSS_POINT_COUNT];
+static int n_m_config = 0;
 
-pthread_t __ilonssGW_writeClient_thread;
-void* ilonssGW_writeClient_thread(void* args);
+static pthread_t __ilonssGW_writeClient_thread;
+static void* ilonssGW_writeClient_thread(void* args);
 
-pthread_t __ilonssGW_fetchClient_thread;
-void* ilonssGW_fetchClient_thread(void* args);
+static pthread_t __ilonssGW_fetchClient_thread;
+static void* ilonssGW_fetchClient_thread(void* args);
 
-char m_writeServer_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
-char m_fetchServer_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
-char m_writeClient_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
-char m_fetchClient_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
+static char m_writeServer_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
+static char m_fetchServer_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
+static char m_writeClient_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
+static char m_fetchClient_ids[IEEE1888_ILONSS_POINT_COUNT][IEEE1888_ILONSS_POINTID_LEN];
 
-int n_m_writeServer_ids=0;
-int n_m_fetchServer_ids=0;
-int n_m_writeClient_ids=0;
-int n_m_fetchClient_ids=0;
+static int n_m_writeServer_ids = 0;
+static int n_m_fetchServer_ids = 0;
+static int n_m_writeClient_ids = 0;
+static int n_m_fetchClient_ids = 0;
 
 #define IEEE1888_SERVER_URL_LEN 256
 
-char m_writeClient_ieee1888_server_url[IEEE1888_SERVER_URL_LEN];
-int m_writeClient_trigger_frequency;
-int m_writeClient_trigger_offset;
+static char m_writeClient_ieee1888_server_url[IEEE1888_SERVER_URL_LEN];
+static int m_writeClient_trigger_frequency;
+static int m_writeClient_trigger_offset;
 
-char m_fetchClient_ieee1888_server_url[IEEE1888_SERVER_URL_LEN];
-int m_fetchClient_trigger_frequency;
-int m_fetchClient_trigger_offset;
+static char m_fetchClient_ieee1888_server_url[IEEE1888_SERVER_URL_LEN];
+static int m_fetchClient_trigger_frequency;
+static int m_fetchClient_trigger_offset;
 
-pthread_t __ilonssGW_printStatus_thread;
-void* ilonssGW_printStatus_thread(void* args);
-char m_printStatus_filepath[256];
+static pthread_t __ilonssGW_printStatus_thread;
+static void* ilonssGW_printStatus_thread(void* args);
+static char m_printStatus_filepath[256];
 
-int m_datapool_timespan;
+static int m_datapool_timespan;
 
-void ilonssGW_log(const char* logMessage, int logLevel);
+static void ilonssGW_log(const char* logMessage, int logLevel);
 
 
-ieee1888_error* ilonssGW_pointsTest(char ids[][IEEE1888_ILONSS_POINTID_LEN], uint8_t access[], int n_point){
+static ieee1888_error* ilonssGW_pointsTest(char ids[][IEEE1888_ILONSS_POINTID_LEN], uint8_t access[], int n_point){
 
   int i,j;
   for(i=0;i<n_point;i++){
@@ -122,7 +124,7 @@ ieee1888_error* ilonssGW_pointsTest(char ids[][IEEE1888_ILONSS_POINTID_LEN], uin
   return NULL;
 }
 
-int ilonssGW_findConfig(char id[], struct ilonssGW_baseConfig** pconfig){
+static int ilonssGW_findConfig(char id[], struct ilonssGW_baseConfig** pconfig){
   
   int j;
   for(j=0;j<n_m_config;j++){
@@ -136,7 +138,7 @@ int ilonssGW_findConfig(char id[], struct ilonssGW_baseConfig** pconfig){
 
 
 #define NOF_CONCURRENCY 80
-int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[], char values[][IEEE1888_ILONSS_VALUE_LEN], int n_point){
+static int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[], char values[][IEEE1888_ILONSS_VALUE_LEN], int n_point){
 
   int i=0, j=0, k, prev_port;
   char prev_host[IEEE1888_ILONSS_HOSTNAME_LEN];
@@ -238,7 +240,7 @@ int ilonssGW_bacnetRead(char ids[][IEEE1888_ILONSS_POINTID_LEN], time_t times[],
   return IEEE1888_ILONSS_OK;
 }
 
-int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][IEEE1888_ILONSS_VALUE_LEN], int n_point){
+static int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][IEEE1888_ILONSS_VALUE_LEN], int n_point){
 
   int i;
   struct ilonssGW_baseConfig *config;
@@ -316,7 +318,7 @@ int ilonssGW_bacnetWrite(char ids[][IEEE1888_ILONSS_POINTID_LEN], char values[][
 }
 
 
-ieee1888_error* ilonssGW_ieee1888read(ieee1888_point point[], int n_point, time_t timeAs){
+static ieee1888_error* ilonssGW_ieee1888read(ieee1888_point point[], int n_point, time_t timeAs){
 
 
   ilonssGW_log("ilonssGW_ieee1888read(begin)\n",IEEE1888_ILONSS_LOGLEVEL_INFO);
@@ -361,7 +363,7 @@ ieee1888_error* ilonssGW_ieee1888read(ieee1888_point point[], int n_point, time_
   }
 }
 
-ieee1888_error* ilonssGW_ieee1888write(ieee1888_point point[], int n_point){
+static ieee1888_error* ilonssGW_ieee1888write(ieee1888_point point[], int n_point){
 
   ilonssGW_log("ilonssGW_ieee1888write(begin)\n",IEEE1888_ILONSS_LOGLEVEL_INFO);
 
@@ -790,7 +792,7 @@ ieee1888_transport* ilonssGW_ieee1888_server_data(ieee1888_transport* request,ch
  *
  */
 
-void* ilonssGW_writeClient_thread(void* args){
+static void* ilonssGW_writeClient_thread(void* args){
 
   // if no points to work on --> return
   if(n_m_writeClient_ids==0){
@@ -873,7 +875,7 @@ void* ilonssGW_writeClient_thread(void* args){
   }
 }
 
-void* ilonssGW_fetchClient_thread(void* args){
+static void* ilonssGW_fetchClient_thread(void* args){
   
   // if no points to work on --> return
   if(n_m_fetchClient_ids==0){
@@ -959,7 +961,7 @@ void* ilonssGW_fetchClient_thread(void* args){
   }
 }
 
-int ilonssGW_readConfig(const char* configPath){
+static int ilonssGW_readConfig(const char* configPath){
 
   int i,k;
 
@@ -1069,7 +1071,7 @@ int ilonssGW_readConfig(const char* configPath){
 
         strcpy(conf.object_id, columns[4]);
 
-        if(strlen(columns[5]) >= 1024){
+        if(strlen(columns[5]) >= IEEE1888_ILONSS_DATA_TYPE_LEN){
           ilonssGW_log("Invalid property id is specified in IIF\n",IEEE1888_ILONSS_LOGLEVEL_ERROR);
           fclose(fp); return IEEE1888_ILONSS_ERROR;
         }
@@ -1219,7 +1221,7 @@ int ilonssGW_readConfig(const char* configPath){
   return IEEE1888_ILONSS_OK;
 }
 
-void ilonssGW_printStatus(FILE* fp){
+static void ilonssGW_printStatus(FILE* fp){
   
   ilonssGW_log("ilonssGW_printStatus(begin)\n", IEEE1888_ILONSS_LOGLEVEL_INFO);
   
@@ -1291,7 +1293,7 @@ void ilonssGW_printStatus(FILE* fp){
   ilonssGW_log("ilonssGW_printStatus(end)\n", IEEE1888_ILONSS_LOGLEVEL_INFO);
 }
 
-void* ilonssGW_printStatus_thread(void* args){
+static void* ilonssGW_printStatus_thread(void* args){
   while(strlen(m_printStatus_filepath)>0){
     FILE* fp=fopen(m_printStatus_filepath,"w");
     if(fp){
@@ -1304,7 +1306,7 @@ void* ilonssGW_printStatus_thread(void* args){
 }
 
 
-void ilonssGW_printConfig(FILE* fp){
+static void ilonssGW_printConfig(FILE* fp){
 
   int i;
   ilonssGW_log("ilonssGW_printConfig(begin)\n", IEEE1888_ILONSS_LOGLEVEL_INFO);
@@ -1349,11 +1351,11 @@ void ilonssGW_printConfig(FILE* fp){
  * LogManager
  *
  */
-char ilonssGW_logPath[256];
-int ilonssGW_logLevel_Threshold;
-pthread_mutex_t ilonssGW_log_mx;
+static char ilonssGW_logPath[256];
+static int ilonssGW_logLevel_Threshold;
+static pthread_mutex_t ilonssGW_log_mx;
 
-void ilonssGW_log(const char* logMessage, int logLevel){
+static void ilonssGW_log(const char* logMessage, int logLevel){
   char date_str[256];
   time_t timer;
   struct tm *date;
@@ -1386,7 +1388,7 @@ void ilonssGW_log(const char* logMessage, int logLevel){
 /*
  * Initializer
  */ 
-int ilonssGW_init(const char* configPath, const char* logPath, const char* dpPath){
+static int ilonssGW_init(const char* configPath, const char* logPath, const char* dpPath){
   
   strncpy(ilonssGW_logPath,logPath,256);
   ilonssGW_logLevel_Threshold=IEEE1888_ILONSS_LOGLEVEL_INFO;
@@ -1416,7 +1418,7 @@ int ilonssGW_init(const char* configPath, const char* logPath, const char* dpPat
   return IEEE1888_ILONSS_OK;
 }
 
-void ilonssGW_printUsage(){
+static void ilonssGW_printUsage(){
   printf("Usage: ieee1888_ilonss_gw -c CONFIG_PATH -l LOG_PATH -p DATAPOOL_PATH\n\n");
 }
 

@@ -23,14 +23,13 @@
 #define ILONSS_PACKET_MAX_LEN 100000
 #define ILONSS_RESP_TIMEOUT 3
 
-void ilonss_recv_fail(int signum){
-  // logging the error;
-  // fprintf(stdout,"ilonss_recv_fail -- response timedout\n");
+static void ilonss_recv_fail(int signum){
+  (void)signum;
 }
 
-int ilonss_invoke(const char* host, unsigned short port, 
-                    const unsigned char* rq, int n_rq,
-		    unsigned char* rs, int* n_rs){  
+static int ilonss_invoke(const char* host, unsigned short port, 
+                         const unsigned char* rq, int n_rq,
+                         unsigned char* rs, int* n_rs){  
   int sock;
   struct sockaddr_in s0;
   struct sockaddr_in s1;
